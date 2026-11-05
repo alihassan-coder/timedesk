@@ -39,6 +39,8 @@ module.exports = {
     ...(!azure && pfx && env.TIMEDESK_PUBLISHER ? { signtoolOptions: { publisherName: [env.TIMEDESK_PUBLISHER] } } : {}),
   },
   nsis: {
+    // No spaces: GitHub renames spaces in release file names, which would break the auto-updater's download link.
+    artifactName: 'timedesk-Setup-${version}.${ext}',
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
@@ -48,7 +50,7 @@ module.exports = {
   linux: {
     icon: 'build/icon.png',
     category: 'Office',
-    maintainer: 'timedesk <alihassan.4dev@gmail.com>',
+    maintainer: 'timedesk <alihassan-coder@users.noreply.github.com>',
     synopsis: 'Time tracking and todos',
     target: [
       { target: 'AppImage', arch: ['x64'] },

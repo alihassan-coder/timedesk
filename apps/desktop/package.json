@@ -14,9 +14,7 @@
     "dist:win": "node scripts/build.mjs && electron-builder --config electron-builder.config.cjs --win nsis --publish never",
     "dist:linux": "node scripts/build.mjs && electron-builder --config electron-builder.config.cjs --linux AppImage deb --publish never",
     "test:e2e": "node e2e/desktop-flow.mjs",
-    "package:dir": "node scripts/build.mjs && electron-builder --config electron-builder.config.cjs --dir --publish never",
-    "release:win": "node scripts/build.mjs && electron-builder --config electron-builder.config.cjs --win nsis --publish always",
-    "release:linux": "node scripts/build.mjs && electron-builder --config electron-builder.config.cjs --linux AppImage deb --publish always"
+    "package:dir": "node scripts/build.mjs && electron-builder --config electron-builder.config.cjs --dir --publish never"
   },
   "dependencies": {
     "@timedesk/shared": "workspace:*",

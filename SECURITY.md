@@ -2,7 +2,7 @@
 
 ## Reporting a problem
 
-Email **alihassan.4dev@gmail.com** with what you found and how to reproduce it. Please do not open a public issue for a security problem. You will get a reply as soon as possible.
+Use GitHub: open the repository's **Security** tab and choose **Report a vulnerability**. That sends it privately to the maintainers. Please do not open a public issue for a security problem. Include what you found and how to reproduce it.
 
 ## What is protected, and how
 

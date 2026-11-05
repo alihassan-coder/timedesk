@@ -48,6 +48,10 @@ describe('Windows code signing switches', () => {
     expect(load({ REQUIRE_SIGNING: 'false' }).win.forceCodeSigning).toBe(false)
   })
 
+  it('names the Windows installer without spaces so the updater link survives GitHub renaming it', () => {
+    expect(load().nsis.artifactName).toBe('timedesk-Setup-${version}.${ext}')
+  })
+
   it('always unpacks the native app-tracking helper and publishes to the GitHub release', () => {
     const cfg = load()
     expect(cfg.asarUnpack).toContain('node_modules/active-win/**')

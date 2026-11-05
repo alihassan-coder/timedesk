@@ -40,9 +40,9 @@ The end-to-end tests refuse to run unless they find the throwaway in-memory API 
 
 ## Build installers
 
-On **Windows**: `TIMEDESK_WEB_URL=https://app.example.com pnpm --filter @timedesk/desktop dist:win` writes `release/timedesk Setup <version>.exe` and `latest.yml`.
+On **Windows**: `TIMEDESK_WEB_URL=https://app.example.com pnpm --filter @timedesk/desktop dist:win` writes `release/timedesk-Setup-<version>.exe` and `latest.yml`.
 
-**Linux installers cannot be built on Windows.** They are built on GitHub: `.github/workflows/desktop-release.yml` runs on a tag like `desktop-v0.1.0`, builds Windows + Linux (AppImage and .deb), and publishes them as a GitHub Release. Set the repo variable `TIMEDESK_WEB_URL` first.
+**Linux installers cannot be built on Windows.** They are built on GitHub: `.github/workflows/desktop-release.yml` runs when you push a tag like `v0.1.0`, builds Windows + Linux (AppImage and .deb), and publishes them as a GitHub Release. Set the repo variable `TIMEDESK_WEB_URL` first. Details and a no-publish dry run are in [docs/DEPLOY.md](../../docs/DEPLOY.md).
 
 Installers are not code-signed yet, so Windows SmartScreen shows "unrecognized app" (More info, Run anyway). A signing certificate fixes that later.
 

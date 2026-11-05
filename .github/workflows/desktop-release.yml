@@ -1,28 +1,35 @@
 name: Desktop release
 
-# Builds the Windows installer and the Linux AppImage + .deb, then publishes them as a GitHub Release.
-# The desktop app checks this same release for updates.
+# Builds the Windows installer and the Linux AppImage + .deb and publishes them as a GitHub Release.
+# Installed apps check that release for updates.
 #
-# To release: bump "version" in apps/desktop/package.json, then
-#   git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+# Publish a release:   bump "version" in apps/desktop/package.json, add a "## <version>" section to CHANGELOG.md,
+#                      commit, then:   git tag v0.1.0 && git push origin v0.1.0
+# Try without publishing: Actions -> Desktop release -> Run workflow (builds everything, publishes nothing, keeps the files as artifacts).
 #
-# One-time setup in the GitHub repo (Settings -> Secrets and variables -> Actions):
-#   Variable  TIMEDESK_WEB_URL     the address of your deployed web app, for example https://app.example.com
-#   Variable  REQUIRE_SIGNING      set to true once you have a certificate: an unsigned Windows build then FAILS
-#                                  instead of publishing an installer that shows the SmartScreen warning
-#   Signing   see docs/SIGNING.md  (Azure Artifact Signing, or a .pfx certificate)
+# Repository settings used (Settings -> Secrets and variables -> Actions):
+#   Variable  TIMEDESK_WEB_URL   REQUIRED for a real release: the address the desktop app opens. Kept here so it is not in the code.
+#   Variable  REQUIRE_SIGNING    optional: "true" makes an unsigned Windows build fail
+#   Signing   optional: see docs/SIGNING.md (AZURE_* or WIN_CSC_*)
 
 on:
   push:
-    tags: ['desktop-v*']
+    tags: ['v*']
   workflow_dispatch:
 
+# Nothing gets more than read access, except the final publish job.
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  test:
+  verify:
+    name: Verify
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -30,22 +37,42 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      - name: Tag, app version and changelog agree
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/release-notes.mjs check "${GITHUB_REF_NAME}"
+
+      - name: The app has an address to open
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          WEB_URL: ${{ vars.TIMEDESK_WEB_URL }}
+        run: |
+          if [ -z "$WEB_URL" ]; then
+            echo "::error::Set the repository variable TIMEDESK_WEB_URL (Settings -> Secrets and variables -> Actions -> Variables). Without it the installer would open localhost."
+            exit 1
+          fi
+          case "$WEB_URL" in https://*) ;; *) echo "::error::TIMEDESK_WEB_URL must start with https://"; exit 1 ;; esac
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @timedesk/shared test
       - run: pnpm --filter @timedesk/desktop test
       - run: pnpm --filter @timedesk/desktop typecheck
 
-  release:
-    needs: test
+  build:
+    name: Build (${{ matrix.name }})
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            script: release:win
-          - os: ubuntu-latest
-            script: release:linux
+          - name: Windows
+            os: windows-latest
+            builder: --win nsis
+          - name: Linux
+            os: ubuntu-latest
+            builder: --linux AppImage deb
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -54,11 +81,20 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build and publish installers
-        run: pnpm --filter @timedesk/desktop run ${{ matrix.script }}
+
+      - name: Build the app
+        working-directory: apps/desktop
+        shell: bash
+        run: node scripts/build.mjs
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TIMEDESK_WEB_URL: ${{ vars.TIMEDESK_WEB_URL }}
+          # A dry run (no tag) falls back to the local address, since nothing is published.
+          TIMEDESK_WEB_URL: ${{ vars.TIMEDESK_WEB_URL || 'http://localhost:5173' }}
+
+      - name: Package the installers (not published here)
+        working-directory: apps/desktop
+        shell: bash
+        run: pnpm exec electron-builder --config electron-builder.config.cjs ${{ matrix.builder }} --publish never
+        env:
           REQUIRE_SIGNING: ${{ matrix.os == 'windows-latest' && vars.REQUIRE_SIGNING || '' }}
           # Windows signing, option A: Azure Artifact Signing
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -72,3 +108,60 @@ jobs:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           TIMEDESK_PUBLISHER: ${{ vars.TIMEDESK_PUBLISHER }}
+
+      - name: List what was built
+        working-directory: apps/desktop/release
+        shell: bash
+        run: ls -la *.exe *.AppImage *.deb *.yml *.blockmap 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.exe.blockmap
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/latest*.yml
+
+  publish:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          ls -la
+          sha256sum *.exe *.AppImage *.deb > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Release notes from the changelog
+        run: node scripts/release-notes.mjs notes "${TAG}" > notes.md
+
+      - name: Create the release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::A release for $TAG already exists. Delete it (and the tag) first, or bump the version."
+            exit 1
+          fi
+          gh release create "$TAG" dist/* \
+            --verify-tag \
+            --title "timedesk ${TAG#v}" \
+            --notes-file notes.md \
+            --latest
