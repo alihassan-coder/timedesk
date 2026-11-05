@@ -1,27 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router'
-import { Brain, KeyRound, Mic, MicOff, Send, Sparkles, Wrench } from 'lucide-react'
-import { PageHeader } from '@/components/page-header'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Badge } from '@/components/ui/badge'
+import { Link, useSearchParams } from 'react-router'
+import { History, KeyRound, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
-import { availableModels, aiActions, useAiSettings } from '@/lib/ai/settings'
-import { memory } from '@/lib/ai/memory'
-import { TOOL_LABELS } from '@/lib/ai/tools'
-import { providerName } from '@/lib/ai/providers'
-import { profile } from '@/lib/profile'
-import { cn } from '@/lib/utils'
-
-interface Message {
-  id: string
-  role: 'user' | 'assistant'
-  text: string
-}
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import { ASSISTANT_NAME, chatActions, useChats } from '@/features/assistant/chat-store'
+import { Composer } from '@/features/assistant/composer'
+import { HistoryPanel } from '@/features/assistant/history-panel'
+import { MessageView } from '@/features/assistant/message-view'
+import { MemoryPopover, ToolsPopover } from '@/features/assistant/popovers'
+import { availableModels, useAiSettings } from '@/lib/ai/settings'
 
 const SUGGESTIONS = [
   'Plan my day around what is due',
@@ -30,259 +17,106 @@ const SUGGESTIONS = [
   'Start a timer on the pricing table task',
 ]
 
-/** Minimal typing for the browser speech API (Chrome and Edge). */
-interface SpeechRecognitionLike {
-  lang: string
-  interimResults: boolean
-  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
-  onend: (() => void) | null
-  onerror: (() => void) | null
-  start(): void
-  stop(): void
-}
-function createRecognition(lang: string): SpeechRecognitionLike | null {
-  const w = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike }
-  const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition
-  if (!Ctor) return null
-  const r = new Ctor()
-  r.lang = lang
-  r.interimResults = false
-  return r
-}
-
 export default function AssistantPage() {
   const ai = useAiSettings()
-  const groups = availableModels(ai)
-  const hasKey = groups.length > 0
-  const [messages, setMessages] = useState<Message[]>([])
-  const [text, setText] = useState('')
-  const [listening, setListening] = useState(false)
+  const hasKey = availableModels(ai).length > 0
+  const { conversations, activeId } = useChats()
+  const active = conversations.find((c) => c.id === activeId)
   const [voiceMode, setVoiceMode] = useState(false)
-  const recRef = useRef<SpeechRecognitionLike | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
+  const [params] = useSearchParams()
+  const deepLink = params.get('chat')
+
+  useEffect(() => {
+    if (deepLink) chatActions.open(deepLink)
+  }, [deepLink])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
-  }, [messages.length])
+  }, [active?.messages.length, activeId])
 
-  const selectedValue = ai.selected ? `${ai.selected.provider}:${ai.selected.model}` : (groups[0] ? `${groups[0].provider.id}:${groups[0].models[0]}` : '')
-  const items = groups.flatMap((g) => g.models.map((m) => ({ value: `${g.provider.id}:${m}`, label: `${g.provider.name} · ${m}` })))
-
-  function send(content: string) {
-    const t = content.trim()
-    if (!t) return
-    setMessages((m) => [
-      ...m,
-      { id: crypto.randomUUID(), role: 'user', text: t },
-      {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        text: 'Interface preview: the agent is not connected yet. Next step wires this box to your selected model, the task and timer tools, and memory.',
-      },
-    ])
-    setText('')
+  function send(text: string) {
+    const id = chatActions.addUserMessage(text)
+    // Interface preview only: the real agent (model + tools + memory) is wired in the next step.
+    chatActions.addAssistantMessage(
+      id,
+      `Interface preview: ${ASSISTANT_NAME} is not connected to a model yet. Next step wires this chat to your selected model, the task and timer tools, and memory.`,
+    )
   }
 
-  function toggleMic() {
-    if (listening) {
-      recRef.current?.stop()
-      return
-    }
-    const rec = createRecognition(ai.voice.lang)
-    if (!rec) {
-      setMessages((m) => [...m, { id: crypto.randomUUID(), role: 'assistant', text: 'This browser has no speech recognition. Use Chrome or Edge, or the desktop app.' }])
-      return
-    }
-    rec.onresult = (e) => {
-      const heard = e.results[0][0].transcript
-      if (voiceMode && ai.voice.autoSend) send(heard)
-      else setText((prev) => (prev ? `${prev} ${heard}` : heard))
-    }
-    rec.onend = () => setListening(false)
-    rec.onerror = () => setListening(false)
-    recRef.current = rec
-    rec.start()
-    setListening(true)
-  }
+  const composer = (
+    <Composer onSend={send} disabled={!hasKey} voiceMode={voiceMode} onVoiceMode={setVoiceMode} className="mx-auto w-full max-w-3xl" />
+  )
 
   return (
-    <div className="flex h-[calc(100svh-9rem)] min-h-[28rem] flex-col gap-4">
-      <PageHeader
-        title="Assistant"
-        description="Ask it to manage your tasks, projects, timer and reports."
-        actions={
-          <>
-            <label className="flex items-center gap-2 text-sm">
-              <Switch checked={voiceMode} onCheckedChange={setVoiceMode} aria-label="Voice mode" /> Voice mode
-            </label>
-            <MemoryPopover />
-            <ToolsPopover />
-          </>
-        }
-      />
+    <div className="flex h-[calc(100svh-3.5rem)]">
+      <aside className="bg-muted/30 hidden w-72 shrink-0 border-r md:block">
+        <HistoryPanel />
+      </aside>
 
-      {!hasKey && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <KeyRound className="size-4" /> Add an API key to start
-            </CardTitle>
-            <CardDescription>
-              Connect OpenAI, Anthropic, Gemini, Groq or xAI Grok. The models you can pick here depend on the keys you add.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button render={<Link to="/settings?tab=ai" />}>Open AI settings</Button>
-          </CardContent>
-        </Card>
-      )}
+      <section className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-12 shrink-0 items-center gap-2 px-4">
+          <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+            <SheetTrigger render={<Button size="icon-sm" variant="ghost" className="md:hidden" aria-label="Chat history" />}>
+              <History />
+            </SheetTrigger>
+            <SheetContent side="left" className="w-80 p-0">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Chat history</SheetTitle>
+              </SheetHeader>
+              <HistoryPanel onPick={() => setHistoryOpen(false)} />
+            </SheetContent>
+          </Sheet>
+          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{active?.title ?? `New chat with ${ASSISTANT_NAME}`}</h1>
+          <MemoryPopover />
+          <ToolsPopover />
+        </div>
 
-      <div className="flex-1 space-y-5 overflow-y-auto rounded-lg border p-4">
-        {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <div className="bg-primary text-primary-foreground flex size-12 items-center justify-center rounded-xl">
-              <Sparkles className="size-6" />
+        {!hasKey && (
+          <div className="bg-muted/50 mx-auto mb-2 flex w-full max-w-3xl items-center gap-3 rounded-lg border px-4 py-2 text-sm">
+            <KeyRound className="size-4 shrink-0" />
+            <span className="flex-1">Add an API key to chat with {ASSISTANT_NAME}. Models depend on the keys you add.</span>
+            <Button size="sm" render={<Link to="/settings?tab=ai" />}>
+              AI settings
+            </Button>
+          </div>
+        )}
+
+        {!active ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pb-16">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary text-primary-foreground flex size-10 items-center justify-center rounded-xl">
+                <Sparkles className="size-5" />
+              </div>
+              <h2 className="text-3xl font-semibold tracking-tight">How can {ASSISTANT_NAME} help?</h2>
             </div>
-            <div>
-              <p className="text-lg font-medium">What should we get done?</p>
-              <p className="text-muted-foreground text-sm">Try one of these, or type your own.</p>
-            </div>
-            <div className="flex max-w-xl flex-wrap justify-center gap-2">
+            {composer}
+            <div className="flex max-w-3xl flex-wrap justify-center gap-2">
               {SUGGESTIONS.map((s) => (
-                <Button key={s} size="sm" variant="outline" onClick={() => send(s)}>
+                <Button key={s} size="sm" variant="outline" className="rounded-full" disabled={!hasKey} onClick={() => send(s)}>
                   {s}
                 </Button>
               ))}
             </div>
           </div>
         ) : (
-          messages.map((m) => (
-            <div key={m.id} className={cn('flex gap-3', m.role === 'user' && 'flex-row-reverse')}>
-              <Avatar className="size-8 shrink-0">
-                <AvatarFallback className={m.role === 'assistant' ? 'bg-primary text-primary-foreground' : ''}>
-                  {m.role === 'assistant' ? <Sparkles className="size-4" /> : profile.initials}
-                </AvatarFallback>
-              </Avatar>
-              <div
-                className={cn(
-                  'max-w-[80%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap',
-                  m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted',
-                )}
-              >
-                {m.text}
+          <>
+            <div className="flex-1 overflow-y-auto px-4">
+              <div className="mx-auto w-full max-w-3xl space-y-8 py-6">
+                {active.messages.map((m) => (
+                  <MessageView key={m.id} message={m} />
+                ))}
+                <div ref={endRef} />
               </div>
             </div>
-          ))
+            <div className="px-4 pt-2 pb-4">
+              {composer}
+              <p className="text-muted-foreground mt-2 text-center text-xs">{ASSISTANT_NAME} can make mistakes. Check important changes.</p>
+            </div>
+          </>
         )}
-        <div ref={endRef} />
-      </div>
-
-      <div className="space-y-2 rounded-xl border p-2">
-        <Textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              if (hasKey) send(text)
-            }
-          }}
-          rows={2}
-          placeholder={listening ? 'Listening...' : 'Message the assistant. Enter to send, Shift+Enter for a new line.'}
-          className="resize-none border-0 shadow-none focus-visible:ring-0"
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <Select value={selectedValue} items={items} onValueChange={(v) => {
-            if (!v) return
-            const [p, ...rest] = v.split(':')
-            aiActions.select(p as never, rest.join(':'))
-          }} disabled={!hasKey}>
-            <SelectTrigger size="sm" className="max-w-64" aria-label="Model">
-              <SelectValue placeholder="No model: add a key first" />
-            </SelectTrigger>
-            <SelectContent>
-              {groups.map((g) => (
-                <SelectGroup key={g.provider.id}>
-                  <SelectLabel>{g.provider.name}</SelectLabel>
-                  {g.models.map((model) => (
-                    <SelectItem key={model} value={`${g.provider.id}:${model}`}>
-                      {model}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              ))}
-            </SelectContent>
-          </Select>
-          {ai.selected && <Badge variant="secondary">{providerName(ai.selected.provider)}</Badge>}
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              size="icon"
-              variant={listening ? 'destructive' : 'outline'}
-              aria-label={listening ? 'Stop listening' : 'Start voice input'}
-              onClick={toggleMic}
-            >
-              {listening ? <MicOff /> : <Mic />}
-            </Button>
-            <Button size="icon" aria-label="Send message" disabled={!hasKey || !text.trim()} onClick={() => send(text)}>
-              <Send />
-            </Button>
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
-  )
-}
-
-function MemoryPopover() {
-  const [items, setItems] = useState(() => memory.list())
-  return (
-    <Popover onOpenChange={(open) => open && setItems(memory.list())}>
-      <PopoverTrigger render={<Button size="sm" variant="outline" />}>
-        <Brain /> Memory
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80">
-        <PopoverHeader>
-          <PopoverTitle>What it remembers about you</PopoverTitle>
-        </PopoverHeader>
-        {items.length === 0 ? (
-          <p className="text-muted-foreground text-sm">Nothing yet. Tell it things like "I work 9 to 5" and it will remember.</p>
-        ) : (
-          <ul className="space-y-2 text-sm">
-            {items.map((m) => (
-              <li key={m.id} className="flex items-start justify-between gap-2">
-                <span>{m.text}</span>
-                <Button size="xs" variant="ghost" onClick={() => { memory.remove(m.id); setItems(memory.list()) }}>
-                  Forget
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="text-muted-foreground mt-3 text-xs">Long-term memory will use mem0 stored in your Neon database.</p>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-function ToolsPopover() {
-  const labels = Object.values(TOOL_LABELS)
-  return (
-    <Popover>
-      <PopoverTrigger render={<Button size="sm" variant="outline" />}>
-        <Wrench /> Tools ({labels.length})
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-72">
-        <PopoverHeader>
-          <PopoverTitle>What the assistant can do</PopoverTitle>
-        </PopoverHeader>
-        <ul className="grid gap-1.5 text-sm">
-          {labels.map((l) => (
-            <li key={l} className="flex items-center gap-2">
-              <span className="bg-primary size-1.5 rounded-full" /> {l}
-            </li>
-          ))}
-        </ul>
-      </PopoverContent>
-    </Popover>
   )
 }

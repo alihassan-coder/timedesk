@@ -23,7 +23,7 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
     label: 'Work',
     items: [
       { to: '/', label: 'Dashboard', icon: 'dashboard' },
-      { to: '/assistant', label: 'Assistant', icon: 'assistant' },
+      { to: '/assistant', label: 'Tempo AI', icon: 'assistant' },
       { to: '/tasks', label: 'Tasks', icon: 'tasks' },
       { to: '/projects', label: 'Projects', icon: 'projects' },
       { to: '/timesheet', label: 'Timesheet', icon: 'timesheet' },

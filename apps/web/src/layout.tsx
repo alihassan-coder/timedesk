@@ -39,7 +39,7 @@ export default function Layout() {
             </Button>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 p-4 md:p-8">
+        <main className={pathname === '/assistant' ? 'flex-1' : 'mx-auto w-full max-w-6xl flex-1 space-y-6 p-4 md:p-8'}>
           <Outlet />
         </main>
       </SidebarInset>
