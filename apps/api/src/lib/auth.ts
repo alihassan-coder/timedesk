@@ -10,16 +10,17 @@ export interface AuthConfig {
   secret: string
   baseURL: string
   webOrigin: string
-  /** This email is made admin and approved automatically on registration. */
-  adminEmail?: string
+  /** These emails are made admin and approved automatically on registration. */
+  adminEmails: string[]
 }
 
 /**
  * Login with email, username and password. Every new account starts as "pending" and cannot
- * sign in until an admin approves it. The one exception is ADMIN_EMAIL, which bootstraps the first admin.
+ * sign in until an admin approves it. The emails in ADMIN_EMAILS bootstrap the admins.
  */
 export function createAuth(cfg: AuthConfig) {
-  const isAdminEmail = (email: string) => !!cfg.adminEmail && email.toLowerCase() === cfg.adminEmail.toLowerCase()
+  const admins = new Set(cfg.adminEmails.map((e) => e.toLowerCase()))
+  const isAdminEmail = (email: string) => admins.has(email.toLowerCase())
 
   return betterAuth({
     database: drizzleAdapter(cfg.db, { provider: 'pg', schema }),

@@ -1,12 +1,11 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { requireUser } from './middleware.ts'
-import { adminRoutes } from './routes/admin.ts'
-import { aiKeyRoutes } from './routes/ai-keys.ts'
-import { projectRoutes } from './routes/projects.ts'
-import { taskRoutes } from './routes/tasks.ts'
-import { timeRoutes } from './routes/time.ts'
+import { createControllers } from './controllers/index.ts'
+import { requireUser } from './middleware/auth.ts'
+import { createRoutes } from './routes/index.ts'
+import { createServices } from './services/index.ts'
 import type { AppEnv, Deps } from './types.ts'
+import { AppError } from './utils/errors.ts'
 
 /** Builds the whole HTTP API from its dependencies, so tests can plug in an in-memory database. */
 export function createApp(deps: Deps) {
@@ -19,18 +18,14 @@ export function createApp(deps: Deps) {
   // Login, registration, sessions: handled by Better Auth.
   app.on(['GET', 'POST'], '/api/auth/*', (c) => deps.auth.handler(c.req.raw))
 
-  // Everything below needs an approved account.
-  const authed = new Hono<AppEnv>()
-  authed.use('*', requireUser(deps))
-  authed.get('/me', (c) => c.json({ user: c.get('user') }))
-  authed.route('/admin', adminRoutes(deps))
-  authed.route('/projects', projectRoutes(deps))
-  authed.route('/tasks', taskRoutes(deps))
-  authed.route('/time-entries', timeRoutes(deps))
-  authed.route('/ai/keys', aiKeyRoutes(deps))
-  app.route('/v1', authed)
+  // Everything under /v1 needs an approved account.
+  const v1 = new Hono<AppEnv>()
+  v1.use('*', requireUser(deps))
+  v1.route('/', createRoutes(createControllers(createServices(deps))))
+  app.route('/v1', v1)
 
   app.onError((err, c) => {
+    if (err instanceof AppError) return c.json({ error: err.message, details: err.details }, err.status)
     console.error(err)
     return c.json({ error: 'Something went wrong on our side.' }, 500)
   })

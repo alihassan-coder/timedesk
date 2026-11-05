@@ -178,9 +178,6 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.6
         version: 2.1.6(hono@4.13.16)
-      '@hono/zod-validator':
-        specifier: ^0.9.1
-        version: 0.9.1(hono@4.13.16)(zod@4.6.7)
       '@timedesk/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -340,6 +337,9 @@ importers:
       typescript:
         specifier: ~7.0.2
         version: 7.0.2
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
 
 packages:
 
@@ -1118,12 +1118,6 @@ packages:
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
-
-  '@hono/zod-validator@0.9.1':
-    resolution: {integrity: sha512-iiv6w0qrIc0arfvCtUqBWsvl4fXjzaTcQcCJTTtCnkawF9HHGE+KjEl0ox3gQJ6rKZEgE3mLExlQCF72M+mNuw==}
-    peerDependencies:
-      hono: '>=4.11.2'
-      zod: ^3.25.0 || ^4.0.0
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -3750,11 +3744,6 @@ snapshots:
   '@hono/node-server@2.1.6(hono@4.13.16)':
     dependencies:
       hono: 4.13.16
-
-  '@hono/zod-validator@0.9.1(hono@4.13.16)(zod@4.6.7)':
-    dependencies:
-      hono: 4.13.16
-      zod: 4.6.7
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
