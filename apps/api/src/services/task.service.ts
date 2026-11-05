@@ -1,4 +1,5 @@
 import { and, eq, isNull } from 'drizzle-orm'
+import { nextDue } from '@timedesk/shared'
 import { schema, type Db } from '@timedesk/db'
 import { notFound } from '../utils/errors.ts'
 import type { SessionUser } from '../types.ts'
@@ -21,9 +22,25 @@ export function createTaskService(db: Db) {
       return row
     },
 
+    /** Completing a recurring task with a due date schedules the next occurrence. */
     async update(userId: string, id: string, patch: UpdateTask) {
+      const [before] = await db.select().from(t).where(owned(userId, id))
+      if (!before) throw notFound('Task')
       const [row] = await db.update(t).set({ ...patch, updatedAt: new Date() }).where(owned(userId, id)).returning()
-      if (!row) throw notFound('Task')
+
+      if (patch.status === 'done' && before.status !== 'done' && before.recurrence && before.due) {
+        await db.insert(t).values({
+          id: crypto.randomUUID(),
+          userId,
+          workspaceId: before.workspaceId,
+          projectId: before.projectId,
+          title: before.title,
+          priority: before.priority,
+          status: 'todo',
+          due: nextDue(before.due, before.recurrence),
+          recurrence: before.recurrence,
+        })
+      }
       return row
     },
 

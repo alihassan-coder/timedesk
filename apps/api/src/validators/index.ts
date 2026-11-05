@@ -40,6 +40,12 @@ export const aiProviders = ['openai', 'anthropic', 'google', 'groq', 'xai'] as c
 export const aiProviderParam = z.object({ provider: z.enum(aiProviders) })
 export const saveAiKey = z.object({ key: z.string().trim().min(8).max(500) })
 
+export const chatBody = z.object({
+  messages: z.array(z.record(z.string(), z.unknown())).min(1).max(200),
+  provider: z.enum(aiProviders),
+  model: z.string().min(1).max(120),
+})
+
 export type CreateProject = z.infer<typeof createProject>
 export type UpdateProject = z.infer<typeof updateProject>
 export type CreateTask = z.infer<typeof createTask>

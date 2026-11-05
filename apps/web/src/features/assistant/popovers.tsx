@@ -2,14 +2,16 @@ import { useState } from 'react'
 import { Brain, Wrench } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
-import { memory } from '@/lib/ai/memory'
-import { TOOL_LABELS } from '@/lib/ai/tools'
+import { forgetMemory, listMemories, useAi, type MemoryItem } from '@/lib/ai/server'
 import { ASSISTANT_NAME } from './chat-store'
+import { TOOL_LABELS } from './tool-labels'
 
 export function MemoryPopover() {
-  const [items, setItems] = useState(() => memory.list())
+  const { memoryEnabled } = useAi()
+  const [items, setItems] = useState<MemoryItem[] | null>(null)
+  const load = () => listMemories().then(setItems).catch(() => setItems([]))
   return (
-    <Popover onOpenChange={(open) => open && setItems(memory.list())}>
+    <Popover onOpenChange={(open) => open && void load()}>
       <PopoverTrigger render={<Button size="sm" variant="ghost" />}>
         <Brain /> Memory
       </PopoverTrigger>
@@ -17,21 +19,24 @@ export function MemoryPopover() {
         <PopoverHeader>
           <PopoverTitle>What {ASSISTANT_NAME} remembers</PopoverTitle>
         </PopoverHeader>
-        {items.length === 0 ? (
-          <p className="text-muted-foreground text-sm">Nothing yet. Tell it things like "I work 9 to 5" and it will remember.</p>
+        {!memoryEnabled ? (
+          <p className="text-muted-foreground text-sm">Memory needs an OpenAI API key (used for embeddings). Add one in Settings, AI assistant.</p>
+        ) : items === null ? (
+          <p className="text-muted-foreground text-sm">Loading...</p>
+        ) : items.length === 0 ? (
+          <p className="text-muted-foreground text-sm">Nothing yet. Tell {ASSISTANT_NAME} things like "I work 9 to 5" and it will remember.</p>
         ) : (
           <ul className="space-y-2 text-sm">
             {items.map((m) => (
               <li key={m.id} className="flex items-start justify-between gap-2">
                 <span>{m.text}</span>
-                <Button size="xs" variant="ghost" onClick={() => { memory.remove(m.id); setItems(memory.list()) }}>
+                <Button size="xs" variant="ghost" onClick={async () => { await forgetMemory(m.id); await load() }}>
                   Forget
                 </Button>
               </li>
             ))}
           </ul>
         )}
-        <p className="text-muted-foreground mt-3 text-xs">Long-term memory will use mem0 stored in your Neon database.</p>
       </PopoverContent>
     </Popover>
   )

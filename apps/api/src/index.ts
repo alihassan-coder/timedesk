@@ -2,6 +2,8 @@ import { createDb } from '@timedesk/db'
 import { createApp } from './app.ts'
 import { loadEnv } from './config/env.ts'
 import { createAuth } from './lib/auth.ts'
+import { createMem0Memory } from './lib/memory.ts'
+import { realModelFactory } from './lib/models.ts'
 
 // Vercel runs this file: the default export is the Hono app (Fluid Compute, zero config).
 const env = loadEnv()
@@ -14,4 +16,4 @@ const auth = createAuth({
   adminEmails: env.ADMIN_EMAILS,
 })
 
-export default createApp({ db, auth, env })
+export default createApp({ db, auth, env, models: realModelFactory, memory: createMem0Memory(env.DATABASE_URL) })

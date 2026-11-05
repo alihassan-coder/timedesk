@@ -28,6 +28,14 @@ export function createAiKeyService(db: Db, secret: string) {
       await db.delete(k).where(and(eq(k.userId, userId), eq(k.provider, provider)))
     },
 
+    /** Every key this user saved, decrypted. Server-side use only (model calls and memory). */
+    async allPlain(userId: string) {
+      const rows = await db.select().from(k).where(eq(k.userId, userId))
+      const keys: Partial<Record<AiProvider, string>> = {}
+      for (const r of rows) keys[r.provider as AiProvider] = decryptSecret(r.encryptedKey, secret)
+      return keys
+    },
+
     async getPlain(userId: string, provider: AiProvider) {
       const [row] = await db.select().from(k).where(and(eq(k.userId, userId), eq(k.provider, provider)))
       return row ? decryptSecret(row.encryptedKey, secret) : null

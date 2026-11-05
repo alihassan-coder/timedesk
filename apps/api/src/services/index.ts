@@ -1,18 +1,24 @@
 import type { Deps } from '../types.ts'
 import { createAdminService } from './admin.service.ts'
 import { createAiKeyService } from './ai-key.service.ts'
+import { createAssistantService } from './assistant.service.ts'
 import { createProjectService } from './project.service.ts'
 import { createTaskService } from './task.service.ts'
 import { createTimeService } from './time.service.ts'
 
 /** Builds every service once from the shared dependencies. */
-export function createServices({ db, env }: Deps) {
+export function createServices({ db, env, models, memory }: Deps) {
+  const aiKeys = createAiKeyService(db, env.KEY_ENCRYPTION_SECRET)
+  const projects = createProjectService(db)
+  const tasks = createTaskService(db)
+  const time = createTimeService(db)
   return {
     admin: createAdminService(db),
-    aiKeys: createAiKeyService(db, env.KEY_ENCRYPTION_SECRET),
-    projects: createProjectService(db),
-    tasks: createTaskService(db),
-    time: createTimeService(db),
+    aiKeys,
+    projects,
+    tasks,
+    time,
+    assistant: createAssistantService({ aiKeys, projects, tasks, time, models, memory }),
   }
 }
 

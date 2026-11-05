@@ -1,6 +1,5 @@
 import { useSyncExternalStore } from 'react'
 import {
-  nextDue,
   type Priority,
   type Project,
   type Recurrence,
@@ -130,21 +129,14 @@ export const actions = {
     )
   },
 
-  /** Completing a recurring task schedules the next occurrence. */
+  /** Completing a recurring task makes the server create the next one. */
   async setStatus(taskId: string, status: TaskStatus) {
     const task = state.tasks.find((t) => t.id === taskId)
     if (!task) return
     set({ tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status } : t)) })
     await sync(() => api(`/tasks/${taskId}`, { method: 'PATCH', body: { status } }))
-    if (status === 'done' && task.status !== 'done' && task.recurrence && task.due) {
-      await actions.addTask({
-        title: task.title,
-        projectId: task.projectId,
-        priority: task.priority,
-        due: nextDue(task.due, task.recurrence),
-        recurrence: task.recurrence,
-      })
-    }
+    // The server schedules the next occurrence of a recurring task, so pick it up.
+    if (status === 'done' && task.status !== 'done' && task.recurrence && task.due) await loadStore()
   },
 
   async deleteTask(taskId: string) {

@@ -11,17 +11,26 @@
     "dev:memory": "tsx src/dev-memory.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.96",
+    "@ai-sdk/google": "^4.0.111",
+    "@ai-sdk/groq": "^4.0.76",
+    "@ai-sdk/openai": "^4.0.108",
+    "@ai-sdk/xai": "^5.0.38",
     "@hono/node-server": "^2.1.6",
     "@timedesk/db": "workspace:*",
     "@timedesk/shared": "workspace:*",
+    "ai": "^7.0.162",
     "better-auth": "^1.7.16",
     "drizzle-orm": "0.45.4",
     "hono": "^4.13.16",
+    "mem0ai": "^3.3.1",
+    "pg": "^8.23.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.15",
     "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"

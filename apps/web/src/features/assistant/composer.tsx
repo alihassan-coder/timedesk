@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react'
-import { ArrowUp, AudioLines, Mic, MicOff } from 'lucide-react'
+import { ArrowUp, AudioLines, Mic, MicOff, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { aiActions, availableModels, useAiSettings } from '@/lib/ai/settings'
 import type { ProviderId } from '@/lib/ai/providers'
+import { useAi } from '@/lib/ai/server'
+import { useAiPrefs } from '@/lib/ai/settings'
 import { cn } from '@/lib/utils'
 import { ASSISTANT_NAME } from './chat-store'
 
@@ -33,31 +34,34 @@ function createRecognition(lang: string): SpeechRecognitionLike | null {
 
 export function Composer({
   onSend,
+  onStop,
+  busy,
   disabled,
   voiceMode,
   onVoiceMode,
   className,
 }: {
   onSend: (text: string) => void
+  onStop: () => void
+  busy: boolean
   disabled: boolean
   voiceMode: boolean
   onVoiceMode: (on: boolean) => void
   className?: string
 }) {
-  const ai = useAiSettings()
-  const groups = availableModels(ai)
+  const ai = useAi()
+  const prefs = useAiPrefs()
   const [text, setText] = useState('')
   const [listening, setListening] = useState(false)
   const [note, setNote] = useState('')
   const recRef = useRef<SpeechRecognitionLike | null>(null)
 
-  const first = groups[0]
-  const value = ai.selected ? `${ai.selected.provider}:${ai.selected.model}` : first ? `${first.provider.id}:${first.models[0]}` : ''
-  const items = groups.flatMap((g) => g.models.map((m) => ({ value: `${g.provider.id}:${m}`, label: m })))
+  const value = ai.current ? `${ai.current.provider}:${ai.current.model}` : ''
+  const items = ai.providers.flatMap((g) => g.models.map((m) => ({ value: `${g.provider}:${m}`, label: m })))
 
   function submit(content = text) {
     const t = content.trim()
-    if (!t || disabled) return
+    if (!t || disabled || busy) return
     onSend(t)
     setText('')
   }
@@ -68,14 +72,14 @@ export function Composer({
       recRef.current?.stop()
       return
     }
-    const rec = createRecognition(ai.voice.lang)
+    const rec = createRecognition(prefs.voice.lang)
     if (!rec) {
       setNote('This browser has no speech recognition. Use Chrome or Edge, or the desktop app.')
       return
     }
     rec.onresult = (e) => {
       const heard = e.results[0][0].transcript
-      if (voiceMode && ai.voice.autoSend) submit(heard)
+      if (voiceMode && prefs.voice.autoSend) submit(heard)
       else setText((prev) => (prev ? `${prev} ${heard}` : heard))
     }
     rec.onend = () => setListening(false)
@@ -90,15 +94,16 @@ export function Composer({
       <div className={cn('flex flex-col items-center gap-3 rounded-2xl border p-6', className)}>
         <button
           onClick={toggleMic}
+          disabled={disabled || busy}
           aria-label={listening ? 'Stop listening' : 'Start listening'}
           className={cn(
-            'bg-primary text-primary-foreground flex size-20 items-center justify-center rounded-full transition',
+            'bg-primary text-primary-foreground flex size-20 items-center justify-center rounded-full transition disabled:opacity-50',
             listening && 'animate-pulse ring-primary/30 ring-8',
           )}
         >
           {listening ? <AudioLines className="size-8" /> : <Mic className="size-8" />}
         </button>
-        <p className="text-muted-foreground text-sm">{note || (listening ? 'Listening. Speak now.' : `Tap to talk to ${ASSISTANT_NAME}`)}</p>
+        <p className="text-muted-foreground text-sm">{note || (busy ? `${ASSISTANT_NAME} is thinking...` : listening ? 'Listening. Speak now.' : `Tap to talk to ${ASSISTANT_NAME}`)}</p>
         <Button size="sm" variant="outline" onClick={() => onVoiceMode(false)}>
           Back to typing
         </Button>
@@ -125,22 +130,22 @@ export function Composer({
         <Select
           value={value}
           items={items}
-          disabled={groups.length === 0}
+          disabled={ai.providers.length === 0}
           onValueChange={(v) => {
             if (!v) return
             const [p, ...rest] = v.split(':')
-            aiActions.select(p as ProviderId, rest.join(':'))
+            ai.select(p as ProviderId, rest.join(':'))
           }}
         >
           <SelectTrigger size="sm" className="max-w-56 border-0 shadow-none" aria-label="Model">
             <SelectValue placeholder="Add an API key" />
           </SelectTrigger>
           <SelectContent>
-            {groups.map((g) => (
-              <SelectGroup key={g.provider.id}>
-                <SelectLabel>{g.provider.name}</SelectLabel>
+            {ai.providers.map((g) => (
+              <SelectGroup key={g.provider}>
+                <SelectLabel>{g.name}</SelectLabel>
                 {g.models.map((model) => (
-                  <SelectItem key={model} value={`${g.provider.id}:${model}`}>
+                  <SelectItem key={model} value={`${g.provider}:${model}`}>
                     {model}
                   </SelectItem>
                 ))}
@@ -156,9 +161,15 @@ export function Composer({
           <Button size="icon" variant="ghost" aria-label="Voice mode" onClick={() => onVoiceMode(true)}>
             <AudioLines />
           </Button>
-          <Button size="icon" className="rounded-full" aria-label="Send message" disabled={disabled || !text.trim()} onClick={() => submit()}>
-            <ArrowUp />
-          </Button>
+          {busy ? (
+            <Button size="icon" className="rounded-full" aria-label="Stop" onClick={onStop}>
+              <Square />
+            </Button>
+          ) : (
+            <Button size="icon" className="rounded-full" aria-label="Send message" disabled={disabled || !text.trim()} onClick={() => submit()}>
+              <ArrowUp />
+            </Button>
+          )}
         </div>
       </div>
     </div>

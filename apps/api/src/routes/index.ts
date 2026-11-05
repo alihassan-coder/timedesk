@@ -31,6 +31,11 @@ export function createRoutes(c: Controllers) {
   r.post('/time-entries/start', c.time.start)
   r.post('/time-entries/stop', c.time.stop)
 
+  r.get('/assistant/models', c.assistant.models)
+  r.get('/assistant/memories', c.assistant.memories)
+  r.delete('/assistant/memories/:id', c.assistant.forget)
+  r.post('/assistant/chat', c.assistant.chat)
+
   r.get('/ai/keys', c.aiKeys.list)
   r.put('/ai/keys/:provider', c.aiKeys.save)
   r.delete('/ai/keys/:provider', c.aiKeys.remove)

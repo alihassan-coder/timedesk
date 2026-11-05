@@ -48,6 +48,16 @@ export function createControllers(s: Services) {
       stop: async (c: C) => c.json({ entry: await s.time.stop(c.get('user').id) }),
     },
 
+    assistant: {
+      models: async (c: C) => c.json(await s.assistant.modelsFor(c.get('user').id)),
+      memories: async (c: C) => c.json({ memories: await s.assistant.memories(c.get('user').id) }),
+      forget: async (c: C) => {
+        const ok = await s.assistant.forget(c.get('user').id, parseParams(c, v.idParam).id)
+        return ok ? c.body(null, 204) : c.json({ error: 'Memory not found.' }, 404)
+      },
+      chat: async (c: C) => s.assistant.chat(c.get('user'), (await parseBody(c, v.chatBody)) as unknown as Parameters<typeof s.assistant.chat>[1]),
+    },
+
     aiKeys: {
       list: async (c: C) => c.json({ keys: await s.aiKeys.list(c.get('user').id) }),
       save: async (c: C) => {

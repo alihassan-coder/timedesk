@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Check, Eye, EyeOff, ExternalLink, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { Check, ExternalLink, Loader2, Trash2 } from 'lucide-react'
+import { Row } from '@/components/setting-row'
 import { Segmented } from '@/components/segmented'
 import { SimpleSelect } from '@/components/simple-select'
 import { Badge } from '@/components/ui/badge'
@@ -7,16 +8,16 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { memory } from '@/lib/ai/memory'
-import { fetchModels, PROVIDERS, type ProviderInfo } from '@/lib/ai/providers'
-import { aiActions, availableModels, useAiSettings } from '@/lib/ai/settings'
-import { Row } from '@/components/setting-row'
+import { PROVIDERS, type ProviderId, type ProviderInfo } from '@/lib/ai/providers'
+import { forgetMemory, listMemories, removeKey, saveKey, useAi, type MemoryItem } from '@/lib/ai/server'
+import { aiActions, useAiPrefs } from '@/lib/ai/settings'
+import { ApiError } from '@/lib/api'
 
 export function AiTab() {
-  const ai = useAiSettings()
-  const groups = availableModels(ai)
-  const options = groups.flatMap((g) => g.models.map((m) => ({ value: `${g.provider.id}:${m}`, label: `${g.provider.name} · ${m}` })))
-  const current = ai.selected ? `${ai.selected.provider}:${ai.selected.model}` : (options[0]?.value ?? '')
+  const ai = useAi()
+  const prefs = useAiPrefs()
+  const options = ai.providers.flatMap((g) => g.models.map((m) => ({ value: `${g.provider}:${m}`, label: `${g.name} · ${m}` })))
+  const current = ai.current ? `${ai.current.provider}:${ai.current.model}` : ''
 
   return (
     <div className="space-y-6">
@@ -24,13 +25,13 @@ export function AiTab() {
         <CardHeader>
           <CardTitle>API keys</CardTitle>
           <CardDescription>
-            Add the providers you use. The assistant only offers models from providers that have a key. Keys are saved on this device
-            for now; once the API exists they move to encrypted storage on the server.
+            Add the providers you use. Keys are encrypted and stored on the server, and are never sent back to the browser. The assistant only offers
+            models from providers that have a key.
           </CardDescription>
         </CardHeader>
         <CardContent className="divide-y">
           {PROVIDERS.map((p) => (
-            <KeyRow key={p.id} provider={p} />
+            <KeyRow key={p.id} provider={p} last4={ai.keys.find((k) => k.provider === p.id)?.last4} modelCount={ai.providers.find((x) => x.provider === p.id)?.models.length} />
           ))}
         </CardContent>
       </Card>
@@ -50,7 +51,7 @@ export function AiTab() {
               options={options}
               onChange={(v) => {
                 const [p, ...rest] = v.split(':')
-                aiActions.select(p as never, rest.join(':'))
+                aiActions.select(p as ProviderId, rest.join(':'))
               }}
             />
           )}
@@ -60,19 +61,19 @@ export function AiTab() {
       <Card>
         <CardHeader>
           <CardTitle>Voice</CardTitle>
-          <CardDescription>Speak to the assistant and hear answers. Uses your browser or desktop speech engine, so no extra key.</CardDescription>
+          <CardDescription>Speak to the assistant and hear answers. Uses your browser or desktop speech engine, so no extra key. Saved on this device.</CardDescription>
         </CardHeader>
         <CardContent className="divide-y">
           <Row title="Read replies aloud" description="In voice mode the assistant speaks its answers.">
-            <Switch checked={ai.voice.speakReplies} onCheckedChange={(v) => aiActions.setVoice({ speakReplies: v })} aria-label="Read replies aloud" />
+            <Switch checked={prefs.voice.speakReplies} onCheckedChange={(v) => aiActions.setVoice({ speakReplies: v })} aria-label="Read replies aloud" />
           </Row>
           <Row title="Send when I stop talking" description="Skip the send button in voice mode.">
-            <Switch checked={ai.voice.autoSend} onCheckedChange={(v) => aiActions.setVoice({ autoSend: v })} aria-label="Send when I stop talking" />
+            <Switch checked={prefs.voice.autoSend} onCheckedChange={(v) => aiActions.setVoice({ autoSend: v })} aria-label="Send when I stop talking" />
           </Row>
           <Row title="Language">
             <SimpleSelect
               className="w-48"
-              value={ai.voice.lang}
+              value={prefs.voice.lang}
               onChange={(lang) => aiActions.setVoice({ lang })}
               options={[
                 { value: 'en-US', label: 'English (US)' },
@@ -85,7 +86,7 @@ export function AiTab() {
           </Row>
           <Row title="Speaking speed">
             <Segmented
-              value={String(ai.voice.rate)}
+              value={String(prefs.voice.rate)}
               onChange={(v) => aiActions.setVoice({ rate: Number(v) })}
               options={[
                 { value: '0.85', label: 'Slow' },
@@ -97,54 +98,50 @@ export function AiTab() {
         </CardContent>
       </Card>
 
-      <MemoryCard />
+      <MemoryCard enabled={ai.memoryEnabled} />
     </div>
   )
 }
 
-function KeyRow({ provider }: { provider: ProviderInfo }) {
-  const ai = useAiSettings()
-  const saved = ai.keys[provider.id]
+function KeyRow({ provider, last4, modelCount }: { provider: ProviderInfo; last4?: string; modelCount?: number }) {
   const [draft, setDraft] = useState('')
-  const [show, setShow] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const count = ai.models[provider.id]?.length
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
   async function save() {
-    const key = draft.trim()
-    if (!key) return
-    aiActions.setKey(provider.id, key)
-    setDraft('')
-    await refresh(key)
-  }
-
-  async function refresh(key = saved) {
-    if (!key) return
-    setLoading(true)
-    aiActions.setModels(provider.id, await fetchModels(provider.id, key))
-    setLoading(false)
+    if (!draft.trim()) return
+    setBusy(true)
+    setError('')
+    try {
+      await saveKey(provider.id, draft.trim())
+      setDraft('')
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not save the key.')
+    }
+    setBusy(false)
   }
 
   return (
     <div className="space-y-3 py-4">
       <div className="flex items-center gap-2">
         <p className="text-sm font-medium">{provider.name}</p>
-        {saved ? <Badge variant="secondary"><Check /> Connected</Badge> : <Badge variant="outline">No key</Badge>}
+        {last4 ? (
+          <Badge variant="secondary">
+            <Check /> Connected
+          </Badge>
+        ) : (
+          <Badge variant="outline">No key</Badge>
+        )}
         <a href={provider.keyUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground ml-auto inline-flex items-center gap-1 text-xs">
           Get a key <ExternalLink className="size-3" />
         </a>
       </div>
 
-      {saved ? (
+      {last4 ? (
         <div className="flex flex-wrap items-center gap-2">
-          <code className="bg-muted rounded-md px-2 py-1 text-xs">{show ? saved : `${saved.slice(0, 4)}${'•'.repeat(12)}${saved.slice(-3)}`}</code>
-          <Button size="icon-sm" variant="ghost" aria-label={show ? 'Hide key' : 'Show key'} onClick={() => setShow(!show)}>
-            {show ? <EyeOff /> : <Eye />}
-          </Button>
-          <Button size="sm" variant="outline" disabled={loading} onClick={() => refresh()}>
-            {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />} {count ? `${count} models` : 'Load models'}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => aiActions.setKey(provider.id, '')}>
+          <code className="bg-muted rounded-md px-2 py-1 text-xs">{'•'.repeat(12)}{last4}</code>
+          {modelCount ? <span className="text-muted-foreground text-xs">{modelCount} models available</span> : null}
+          <Button size="sm" variant="ghost" disabled={busy} onClick={async () => { setBusy(true); await removeKey(provider.id); setBusy(false) }}>
             <Trash2 /> Remove
           </Button>
         </div>
@@ -153,39 +150,46 @@ function KeyRow({ provider }: { provider: ProviderInfo }) {
           className="flex gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            save()
+            void save()
           }}
         >
           <Input type="password" autoComplete="off" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={provider.keyHint} aria-label={`${provider.name} API key`} />
-          <Button type="submit" disabled={!draft.trim() || loading}>
-            {loading && <Loader2 className="animate-spin" />} Save key
+          <Button type="submit" disabled={!draft.trim() || busy}>
+            {busy && <Loader2 className="animate-spin" />} Save key
           </Button>
         </form>
       )}
+      {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
     </div>
   )
 }
 
-function MemoryCard() {
-  const [items, setItems] = useState(() => memory.list())
+function MemoryCard({ enabled }: { enabled: boolean }) {
+  const [items, setItems] = useState<MemoryItem[] | null>(null)
+  const load = () => listMemories().then(setItems).catch(() => setItems([]))
   return (
     <Card>
       <CardHeader>
         <CardTitle>Memory</CardTitle>
         <CardDescription>
-          Facts the assistant keeps about you between conversations. Today they stay on this device; the plan is the mem0 open source
-          SDK storing them in your Neon database.
+          Facts the assistant keeps about you between conversations, stored in your database with mem0. It needs an OpenAI key for embeddings.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {items.length === 0 ? (
+        {!enabled ? (
+          <p className="text-muted-foreground text-sm">Memory is off. Add an OpenAI key above to turn it on.</p>
+        ) : items === null ? (
+          <Button variant="outline" size="sm" onClick={() => void load()}>
+            Show what it remembers
+          </Button>
+        ) : items.length === 0 ? (
           <p className="text-muted-foreground text-sm">Nothing remembered yet.</p>
         ) : (
           <ul className="divide-y rounded-lg border">
             {items.map((m) => (
               <li key={m.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
                 {m.text}
-                <Button size="icon-sm" variant="ghost" aria-label="Forget" onClick={() => { memory.remove(m.id); setItems(memory.list()) }}>
+                <Button size="icon-sm" variant="ghost" aria-label="Forget" onClick={async () => { await forgetMemory(m.id); await load() }}>
                   <Trash2 />
                 </Button>
               </li>

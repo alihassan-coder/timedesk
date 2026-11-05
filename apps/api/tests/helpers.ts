@@ -3,6 +3,10 @@ import { schema, type Db } from '@timedesk/db'
 import { createTestDb } from '@timedesk/db/testing'
 import { createApp } from '../src/app.ts'
 import { createAuth } from '../src/lib/auth.ts'
+import { noMemory, type MemoryProvider } from '../src/lib/memory.ts'
+import type { ModelFactory } from '../src/lib/models.ts'
+import { MockLanguageModelV4 } from 'ai/test'
+import { simulateReadableStream } from 'ai'
 
 export const WEB_ORIGIN = 'http://localhost:5173'
 export const ADMIN_EMAIL = 'boss@example.com'
@@ -13,11 +17,11 @@ export interface TestApp {
 }
 
 /** The real app on a fresh in-memory Postgres with every migration applied. */
-export async function createTestApp(): Promise<TestApp> {
+export async function createTestApp(overrides: { models?: ModelFactory; memory?: MemoryProvider } = {}): Promise<TestApp> {
   const db = await createTestDb()
   const env = { WEB_ORIGIN, KEY_ENCRYPTION_SECRET: 'k'.repeat(40) }
   const auth = createAuth({ db, secret: 's'.repeat(40), baseURL: 'http://localhost:3001', webOrigin: WEB_ORIGIN, adminEmails: [ADMIN_EMAIL] })
-  return { app: createApp({ db, auth, env }), db }
+  return { app: createApp({ db, auth, env, models: overrides.models ?? (() => { throw new Error('no model configured for this test') }), memory: overrides.memory ?? noMemory }), db }
 }
 
 const json = (body: unknown, cookie?: string): RequestInit => ({
@@ -81,4 +85,38 @@ export function api(t: TestApp, cookie: string) {
     put: (p: string, b: unknown) => call('PUT', p, b),
     del: (p: string) => call('DELETE', p),
   }
+}
+
+// ---- fakes for the assistant ----
+
+const usage = {
+  inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: 5, text: 5, reasoning: undefined },
+}
+
+/** A step where the model calls a tool. */
+export const toolStep = (toolName: string, input: unknown, id = 'call-1') => [
+  { type: 'tool-call' as const, toolCallId: id, toolName, input: JSON.stringify(input) },
+  { type: 'finish' as const, finishReason: { unified: 'tool-calls' as const, raw: undefined }, logprobs: undefined, usage },
+]
+
+/** A step where the model answers with text. */
+export const textStep = (text: string) => [
+  { type: 'text-start' as const, id: 't1' },
+  { type: 'text-delta' as const, id: 't1', delta: text },
+  { type: 'text-end' as const, id: 't1' },
+  { type: 'finish' as const, finishReason: { unified: 'stop' as const, raw: undefined }, logprobs: undefined, usage },
+]
+
+/** A language model that plays back scripted steps and records every prompt it was sent. */
+export function scriptedModel(steps: unknown[][]) {
+  const prompts: unknown[] = []
+  const model = new MockLanguageModelV4({
+    doStream: async (options) => {
+      prompts.push(options.prompt)
+      const chunks = steps[Math.min(prompts.length - 1, steps.length - 1)]
+      return { stream: simulateReadableStream({ chunks: chunks as never }) }
+    },
+  })
+  return { model, prompts }
 }
