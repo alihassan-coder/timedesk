@@ -1,8 +1,26 @@
 import { Link, useLocation } from 'react-router'
-import { BarChart3, ChevronsUpDown, LayoutDashboard, ListChecks, LogOut, Moon, Sun, Timer } from 'lucide-react'
-import { formatDuration, entryDuration } from '@timedesk/shared'
+import {
+  Activity,
+  BarChart3,
+  CalendarDays,
+  CalendarCheck,
+  ChevronsUpDown,
+  Download,
+  FolderKanban,
+  LayoutDashboard,
+  ListChecks,
+  LogOut,
+  MessageSquare,
+  Monitor,
+  Moon,
+  Settings,
+  Sun,
+  Table2,
+} from 'lucide-react'
 import { LogoMark } from '@/components/logo'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,58 +39,75 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar'
-import { useStore } from '@/data/store'
-import { useNow } from '@/data/use-now'
+import { navGroups } from '@/lib/nav'
 import { profile } from '@/lib/profile'
-import { setTheme, useTheme } from '@/lib/theme'
+import { toggleMode, useAppearance } from '@/lib/appearance'
 
-export const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/tasks', label: 'Tasks', icon: ListChecks },
-  { to: '/timer', label: 'Timer', icon: Timer },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
-] as const
+const ICONS = {
+  dashboard: LayoutDashboard,
+  tasks: ListChecks,
+  projects: FolderKanban,
+  timesheet: Table2,
+  reports: BarChart3,
+  review: CalendarCheck,
+  apps: Monitor,
+  calendar: CalendarDays,
+  chat: MessageSquare,
+  activity: Activity,
+  settings: Settings,
+}
 
 export function AppSidebar() {
   const { pathname } = useLocation()
+  const a = useAppearance()
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible={a.sidebarCollapse} variant={a.sidebarVariant}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link to="/" />}>
               <LogoMark className="size-8 shrink-0" />
-              <span className="text-lg font-semibold tracking-tight">timedesk</span>
+              <div className="grid flex-1 text-left leading-tight">
+                <span className="truncate font-semibold">timedesk</span>
+                <span className="text-muted-foreground truncate text-xs">Team of 4</span>
+              </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {NAV.map(({ to, label, icon: Icon }) => (
-                <SidebarMenuItem key={to}>
-                  <SidebarMenuButton isActive={pathname === to} tooltip={label} render={<Link to={to} />}>
-                    <Icon />
-                    <span>{label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {navGroups.map((group) => (
+          <SidebarGroup key={group.label}>
+            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => {
+                  const Icon = ICONS[item.icon]
+                  return (
+                    <SidebarMenuItem key={item.to}>
+                      <SidebarMenuButton isActive={pathname === item.to} tooltip={item.label} render={<Link to={item.to} />}>
+                        <Icon />
+                        <span>{item.label}</span>
+                      </SidebarMenuButton>
+                      {item.badge && <SidebarMenuBadge>{item.badge}</SidebarMenuBadge>}
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
 
       <SidebarFooter>
-        <RunningChip />
+        <GetAppCard />
         <ProfileMenu />
       </SidebarFooter>
       <SidebarRail />
@@ -80,25 +115,28 @@ export function AppSidebar() {
   )
 }
 
-/** Small live readout in the sidebar so a running timer is visible from every page. */
-function RunningChip() {
-  const { tasks, entries } = useStore()
-  const running = entries.find((e) => e.endedAt === null)
-  const now = useNow(!!running)
+function GetAppCard() {
   const { state } = useSidebar()
-  if (!running || state === 'collapsed') return null
-  const title = running.taskId ? tasks.find((t) => t.id === running.taskId)?.title : null
+  if (state === 'collapsed') return null
   return (
-    <Link to="/timer" className="bg-live text-live-foreground block rounded-md px-3 py-2">
-      <p className="truncate text-xs">{title ?? 'Stopwatch'}</p>
-      <p className="text-lg leading-tight font-semibold">{formatDuration(entryDuration(running, now))}</p>
-    </Link>
+    <div className="bg-sidebar-accent/60 space-y-2 rounded-lg border p-3">
+      <div className="flex items-center gap-2">
+        <Download className="size-4" />
+        <p className="text-sm font-medium">Desktop app</p>
+        <Badge variant="secondary" className="ml-auto">v0.1.0</Badge>
+      </div>
+      <p className="text-muted-foreground text-xs">Track apps and sites automatically and get native reminders.</p>
+      <Button size="sm" className="w-full" render={<Link to="/download" />}>
+        Download
+      </Button>
+    </div>
   )
 }
 
 function ProfileMenu() {
-  const theme = useTheme()
+  const a = useAppearance()
   const { isMobile } = useSidebar()
+  const dark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -109,7 +147,7 @@ function ProfileMenu() {
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-medium">{profile.name}</span>
-              <span className="text-sidebar-foreground/70 truncate text-xs">{profile.email}</span>
+              <span className="text-muted-foreground truncate text-xs">{profile.email}</span>
             </div>
             <ChevronsUpDown className="ml-auto size-4" />
           </DropdownMenuTrigger>
@@ -118,13 +156,16 @@ function ProfileMenu() {
               <DropdownMenuLabel>{profile.email}</DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-              {theme === 'dark' ? <Sun /> : <Moon />}
-              {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+            <DropdownMenuItem render={<Link to="/settings" />}>
+              <Settings /> Settings
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={toggleMode} data-mode={a.mode}>
+              {dark ? <Sun /> : <Moon />}
+              {dark ? 'Light mode' : 'Dark mode'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem disabled>
-              <LogOut />
-              Sign out (login is not built yet)
+              <LogOut /> Sign out (login is not built yet)
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
