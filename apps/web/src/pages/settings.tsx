@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { Row } from '@/components/setting-row'
+import { useProfile } from '@/lib/auth-client'
 import { AiTab } from '@/pages/settings-ai'
 import { Check, Monitor, Moon, RotateCcw, Sun } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
@@ -287,20 +288,21 @@ function IntegrationsTab() {
 }
 
 function AccountTab() {
+  const { user } = useProfile()
   return (
     <Card>
       <CardHeader>
         <CardTitle>Account</CardTitle>
-        <CardDescription>Login with username and password arrives with the API. An admin approves each new account.</CardDescription>
+        <CardDescription>You sign in with your username or email. An admin approves each new account.</CardDescription>
       </CardHeader>
       <CardContent className="max-w-md space-y-4">
         <div className="space-y-2">
           <Label htmlFor="username">Username</Label>
-          <Input id="username" defaultValue="rehandev" disabled />
+          <Input id="username" defaultValue={user?.username ?? ''} disabled />
         </div>
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" defaultValue="rehandev@valyd.id" disabled />
+          <Input id="email" defaultValue={user?.email ?? ''} disabled />
         </div>
       </CardContent>
     </Card>

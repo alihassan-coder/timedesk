@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import {
   Activity,
   BarChart3,
@@ -13,6 +13,7 @@ import {
   Monitor,
   Moon,
   Settings,
+  ShieldCheck,
   Sparkles,
   Sun,
   Table2,
@@ -45,8 +46,8 @@ import {
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar'
-import { navGroups } from '@/lib/nav'
-import { profile } from '@/lib/profile'
+import { navGroupsFor } from '@/lib/nav'
+import { authClient, useProfile } from '@/lib/auth-client'
 import { toggleMode, useAppearance } from '@/lib/appearance'
 
 const ICONS = {
@@ -61,11 +62,13 @@ const ICONS = {
   assistant: Sparkles,
   activity: Activity,
   settings: Settings,
+  admin: ShieldCheck,
 }
 
 export function AppSidebar() {
   const { pathname } = useLocation()
   const a = useAppearance()
+  const { user } = useProfile()
   return (
     <Sidebar collapsible={a.sidebarCollapse} variant={a.sidebarVariant}>
       <SidebarHeader>
@@ -83,7 +86,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {navGroups.map((group) => (
+        {navGroupsFor(!!user?.isAdmin).map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -135,6 +138,8 @@ function GetAppCard() {
 
 function ProfileMenu() {
   const a = useAppearance()
+  const { user } = useProfile()
+  const navigate = useNavigate()
   const { isMobile } = useSidebar()
   const dark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
   return (
@@ -143,17 +148,17 @@ function ProfileMenu() {
         <DropdownMenu>
           <DropdownMenuTrigger render={<SidebarMenuButton size="lg" />}>
             <Avatar className="size-8 rounded-lg">
-              <AvatarFallback className="rounded-lg">{profile.initials}</AvatarFallback>
+              <AvatarFallback className="rounded-lg">{user?.initials}</AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="truncate font-medium">{profile.name}</span>
-              <span className="text-muted-foreground truncate text-xs">{profile.email}</span>
+              <span className="truncate font-medium">{user?.name}</span>
+              <span className="text-muted-foreground truncate text-xs">{user?.email}</span>
             </div>
             <ChevronsUpDown className="ml-auto size-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent side={isMobile ? 'bottom' : 'right'} align="end" className="min-w-56">
             <DropdownMenuGroup>
-              <DropdownMenuLabel>{profile.email}</DropdownMenuLabel>
+              <DropdownMenuLabel>{user?.email}</DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem render={<Link to="/settings" />}>
@@ -164,8 +169,8 @@ function ProfileMenu() {
               {dark ? 'Light mode' : 'Dark mode'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem disabled>
-              <LogOut /> Sign out (login is not built yet)
+            <DropdownMenuItem onClick={async () => { await authClient.signOut(); navigate('/login', { replace: true }) }}>
+              <LogOut /> Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

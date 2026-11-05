@@ -10,6 +10,7 @@ export type NavIcon =
   | 'assistant'
   | 'activity'
   | 'settings'
+  | 'admin'
 
 export interface NavItem {
   to: string
@@ -50,6 +51,7 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
 export const extraTitles: Record<string, string> = {
   '/settings': 'Settings',
   '/download': 'Desktop app',
+  '/admin': 'Team members',
 }
 
 export function titleFor(pathname: string): string {
@@ -58,4 +60,9 @@ export function titleFor(pathname: string): string {
     if (hit) return hit.label
   }
   return extraTitles[pathname] ?? 'timedesk'
+}
+
+/** Admins also see a Team members page for approving new accounts. */
+export function navGroupsFor(isAdmin: boolean) {
+  return isAdmin ? [...navGroups, { label: 'Admin', items: [{ to: '/admin', label: 'Team members', icon: 'admin' as const }] }] : navGroups
 }
