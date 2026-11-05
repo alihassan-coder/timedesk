@@ -2,6 +2,14 @@
 
 Three things get deployed from this repo: the **API**, the **web app** (two separate Vercel projects), and the **desktop installers** (GitHub Actions). The database is the Neon project you already have.
 
+## Your chosen setup
+
+- **Web app:** https://timedesk.plotap.com
+- **API:** the default Vercel address of the API project (expected `https://timedesk-api.vercel.app`; check it after the first deploy)
+- Because those are different sites, the API needs `CROSS_SITE_COOKIES=true`. Chrome allows that cookie; Safari and Chrome incognito block it, so login fails there. When you can, add `api.plotap.com` to the API project, set `BETTER_AUTH_URL` to it, update `VITE_API_URL` in the web project, and empty `CROSS_SITE_COOKIES`.
+- Ready-to-paste values are in `apps/api/.env.production` and `apps/web/.env.production` on your computer. Both are git-ignored because they contain secrets.
+- Desktop installers: set the GitHub variable `TIMEDESK_WEB_URL` to `https://timedesk.plotap.com`.
+
 ## 1. API (Vercel project "timedesk-api")
 
 1. Vercel -> Add New Project -> import `alihassan-coder/timedesk`.
