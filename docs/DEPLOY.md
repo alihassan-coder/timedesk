@@ -14,7 +14,7 @@ Three things get deployed from this repo: the **API**, the **web app** (two sepa
 
 1. Vercel -> Add New Project -> import `alihassan-coder/timedesk`.
 2. **Root Directory:** `apps/api`. Turn on **Include source files outside of the Root Directory** (the API uses `packages/db` and `packages/shared`).
-3. Framework Preset: **Other**. Node.js 22. Everything else comes from `apps/api/vercel.json`: it installs from the repo root, runs `pnpm run build` (bundles the API into one file, `dist/server.mjs`), and sends every request to `api/index.js`. Leave the build and install command fields empty.
+3. Framework Preset: **Other** or **Hono** (either works). Node.js 22. Everything else comes from `apps/api/vercel.json`: it installs from the repo root, runs `pnpm run build` (bundles the API into one file, `dist/server.mjs`, whose default export is the app), and tells Vercel the output folder is `dist`. Leave the build, install and output fields empty.
 4. **Environment variables** (Production, and Preview if you use it):
 
 | Variable | Value |
