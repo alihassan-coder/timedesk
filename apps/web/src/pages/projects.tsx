@@ -24,6 +24,11 @@ export default function ProjectsPage() {
         description="Everything you track and plan belongs to a project."
         actions={<NewProjectDialog />}
       />
+      {projects.length === 0 && (
+        <div className="text-muted-foreground rounded-lg border border-dashed py-16 text-center text-sm">
+          No projects yet. Use New project to create your first one.
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {projects.map((p) => {
           const mine = tasks.filter((t) => t.projectId === p.id)

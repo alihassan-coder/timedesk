@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Link, Outlet, useLocation } from 'react-router'
 import { Moon, Settings, Sun } from 'lucide-react'
 import { AppSidebar } from '@/components/app-sidebar'
@@ -7,11 +8,15 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from '@/co
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { loadStore } from '@/data/store'
 import { toggleMode, useAppearance } from '@/lib/appearance'
 import { titleFor } from '@/lib/nav'
 
 export default function Layout() {
   const { pathname } = useLocation()
+  useEffect(() => {
+    void loadStore()
+  }, [])
   useAppearance() // re-render when the mode changes so the sun/moon icon updates
   const dark = document.documentElement.classList.contains('dark')
   return (

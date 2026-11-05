@@ -46,6 +46,7 @@ import {
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar'
+import { resetStore } from '@/data/store'
 import { navGroupsFor } from '@/lib/nav'
 import { authClient, useProfile } from '@/lib/auth-client'
 import { toggleMode, useAppearance } from '@/lib/appearance'
@@ -169,7 +170,7 @@ function ProfileMenu() {
               {dark ? 'Light mode' : 'Dark mode'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={async () => { await authClient.signOut(); navigate('/login', { replace: true }) }}>
+            <DropdownMenuItem onClick={async () => { await authClient.signOut(); resetStore(); navigate('/login', { replace: true }) }}>
               <LogOut /> Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>

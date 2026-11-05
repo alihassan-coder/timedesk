@@ -1,31 +1,40 @@
 import { useSyncExternalStore } from 'react'
-import { nextDue, type Priority, type Project, type Recurrence, type Task, type TaskStatus, type TimeEntry } from '@timedesk/shared'
-import { buildEntries, buildTasks, projects } from './seed'
+import {
+  nextDue,
+  type Priority,
+  type Project,
+  type Recurrence,
+  type Task,
+  type TaskStatus,
+  type TimeEntry,
+} from '@timedesk/shared'
+import { api, ApiError } from '@/lib/api'
 
 /**
- * IN-MEMORY store seeded with dummy data (resets on refresh). Every screen reads and writes
- * through this file only, so phase 2 swaps it for PowerSync + the API without touching the UI.
+ * Data layer. Everything the screens show comes from the timedesk API (your Neon database) and is
+ * scoped to the signed-in person. Screens read and write only through this file, so the offline
+ * sync engine can replace it later without touching any screen.
+ *
+ * Updates are optimistic: the screen changes at once, then the API call runs. If it fails, the
+ * data is reloaded from the server and `error` explains what happened.
  */
 interface State {
   projects: Project[]
   tasks: Task[]
   entries: TimeEntry[]
+  /** False until the first load finishes. */
+  ready: boolean
+  error: string
 }
 
-const now0 = Date.now()
-let state: State = {
-  projects,
-  tasks: buildTasks(now0),
-  entries: buildEntries(now0),
-}
+const EMPTY: State = { projects: [], tasks: [], entries: [], ready: false, error: '' }
+let state: State = EMPTY
 const listeners = new Set<() => void>()
 
-function set(next: State) {
-  state = next
+function set(next: Partial<State>) {
+  state = { ...state, ...next }
   listeners.forEach((l) => l())
 }
-
-export const getState = () => state
 
 export function useStore(): State {
   return useSyncExternalStore(
@@ -37,7 +46,57 @@ export function useStore(): State {
   )
 }
 
-const newId = () => crypto.randomUUID()
+export const getState = () => state
+
+interface ApiTask extends Omit<Task, 'createdAt'> {
+  createdAt: string
+}
+interface ApiEntry {
+  id: string
+  taskId: string | null
+  projectId: string | null
+  startedAt: string
+  endedAt: string | null
+}
+
+const toTask = (t: ApiTask): Task => ({
+  id: t.id,
+  title: t.title,
+  projectId: t.projectId,
+  status: t.status,
+  priority: t.priority,
+  due: t.due,
+  recurrence: t.recurrence,
+  createdAt: new Date(t.createdAt).getTime(),
+})
+const toEntry = (e: ApiEntry): TimeEntry => ({
+  id: e.id,
+  taskId: e.taskId,
+  projectId: e.projectId,
+  startedAt: new Date(e.startedAt).getTime(),
+  endedAt: e.endedAt ? new Date(e.endedAt).getTime() : null,
+})
+const message = (e: unknown) => (e instanceof ApiError ? e.message : 'Could not reach the server.')
+
+/** Loads everything for the signed-in person. */
+export async function loadStore() {
+  try {
+    const [p, t, e] = await Promise.all([
+      api<{ projects: Project[] }>('/projects'),
+      api<{ tasks: ApiTask[] }>('/tasks'),
+      api<{ entries: ApiEntry[] }>('/time-entries'),
+    ])
+    set({ projects: p.projects, tasks: t.tasks.map(toTask), entries: e.entries.map(toEntry), ready: true, error: '' })
+  } catch (e) {
+    set({ ready: true, error: message(e) })
+  }
+}
+
+/** Forget everything, for example on sign out, so the next person never sees it. */
+export function resetStore() {
+  state = EMPTY
+  listeners.forEach((l) => l())
+}
 
 export interface NewTask {
   title: string
@@ -47,47 +106,82 @@ export interface NewTask {
   recurrence: Recurrence | null
 }
 
+/** Runs an API call after an optimistic update. On failure, reload the truth from the server. */
+async function sync(call: () => Promise<unknown>) {
+  try {
+    await call()
+  } catch (e) {
+    await loadStore()
+    set({ error: message(e) })
+  }
+}
+
 export const actions = {
-  addTask(input: NewTask) {
+  async addTask(input: NewTask) {
     const title = input.title.trim()
     if (!title) return
-    set({ ...state, tasks: [{ id: newId(), ...input, title, status: 'todo', createdAt: Date.now() }, ...state.tasks] })
+    const task: Task = { id: crypto.randomUUID(), ...input, title, status: 'todo', createdAt: Date.now() }
+    set({ tasks: [task, ...state.tasks] })
+    await sync(() =>
+      api('/tasks', {
+        method: 'POST',
+        body: { id: task.id, title, projectId: task.projectId, priority: task.priority, due: task.due, recurrence: task.recurrence },
+      }),
+    )
   },
 
   /** Completing a recurring task schedules the next occurrence. */
-  setStatus(taskId: string, status: TaskStatus) {
+  async setStatus(taskId: string, status: TaskStatus) {
     const task = state.tasks.find((t) => t.id === taskId)
     if (!task) return
-    let tasks = state.tasks.map((t) => (t.id === taskId ? { ...t, status } : t))
+    set({ tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status } : t)) })
+    await sync(() => api(`/tasks/${taskId}`, { method: 'PATCH', body: { status } }))
     if (status === 'done' && task.status !== 'done' && task.recurrence && task.due) {
-      tasks = [{ ...task, id: newId(), status: 'todo', due: nextDue(task.due, task.recurrence), createdAt: Date.now() }, ...tasks]
+      await actions.addTask({
+        title: task.title,
+        projectId: task.projectId,
+        priority: task.priority,
+        due: nextDue(task.due, task.recurrence),
+        recurrence: task.recurrence,
+      })
     }
-    set({ ...state, tasks })
   },
 
-  addProject(name: string, description: string) {
+  async deleteTask(taskId: string) {
+    set({ tasks: state.tasks.filter((t) => t.id !== taskId) })
+    await sync(() => api(`/tasks/${taskId}`, { method: 'DELETE' }))
+  },
+
+  async addProject(name: string, description: string) {
     const n = name.trim()
     if (!n) return
     const color = ((state.projects.length % 5) + 1) as Project['color']
-    set({ ...state, projects: [...state.projects, { id: newId(), name: n, description: description.trim(), color }] })
+    const project: Project = { id: crypto.randomUUID(), name: n, description: description.trim(), color }
+    set({ projects: [...state.projects, project] })
+    await sync(() => api('/projects', { method: 'POST', body: project }))
   },
 
-  deleteTask(taskId: string) {
-    set({ ...state, tasks: state.tasks.filter((t) => t.id !== taskId) })
-  },
-
-  /** Only one timer runs at a time, so any running one is stopped first. */
-  startTimer(target: { taskId?: string | null; projectId?: string | null }) {
-    const now = Date.now()
+  /** Only one timer runs at a time. The server stops any running one, and we mirror that here. */
+  async startTimer(target: { taskId?: string | null; projectId?: string | null }) {
     const taskId = target.taskId ?? null
     const projectId = target.projectId ?? state.tasks.find((t) => t.id === taskId)?.projectId ?? null
-    const entries = state.entries.map((e) => (e.endedAt === null ? { ...e, endedAt: now } : e))
-    set({ ...state, entries: [...entries, { id: newId(), taskId, projectId, startedAt: now, endedAt: null }] })
+    try {
+      const { entry } = await api<{ entry: ApiEntry }>('/time-entries/start', { method: 'POST', body: { taskId, projectId } })
+      const now = Date.now()
+      set({ entries: [...state.entries.map((e) => (e.endedAt === null ? { ...e, endedAt: now } : e)), toEntry(entry)], error: '' })
+    } catch (e) {
+      set({ error: message(e) })
+    }
   },
 
-  stopTimer() {
-    const now = Date.now()
-    set({ ...state, entries: state.entries.map((e) => (e.endedAt === null ? { ...e, endedAt: now } : e)) })
+  async stopTimer() {
+    try {
+      const { entry } = await api<{ entry: ApiEntry }>('/time-entries/stop', { method: 'POST' })
+      const done = toEntry(entry)
+      set({ entries: state.entries.map((e) => (e.id === done.id ? done : e)), error: '' })
+    } catch (e) {
+      await loadStore()
+      set({ error: message(e) })
+    }
   },
-
 }

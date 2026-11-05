@@ -69,7 +69,7 @@ export const agentTools = {
       repeat: z.enum(['daily', 'weekly', 'monthly']).optional(),
     }),
     execute: async ({ title, project, priority, due, repeat }) => {
-      actions.addTask({
+      await actions.addTask({
         title,
         projectId: findProjectId(project),
         priority,
@@ -86,7 +86,7 @@ export const agentTools = {
     execute: async ({ task, status }) => {
       const t = findTask(task)
       if (!t) return { error: `No task matches "${task}".` }
-      actions.setStatus(t.id, status)
+      await actions.setStatus(t.id, status)
       return { updated: summary(getState().tasks.find((x) => x.id === t.id)!) }
     },
   }),
@@ -97,7 +97,7 @@ export const agentTools = {
     execute: async ({ task }) => {
       const t = findTask(task)
       if (!t) return { error: `No task matches "${task}".` }
-      actions.deleteTask(t.id)
+      await actions.deleteTask(t.id)
       return { deleted: t.title }
     },
   }),
@@ -115,7 +115,7 @@ export const agentTools = {
     description: 'Create a new project.',
     inputSchema: z.object({ name: z.string().min(1), description: z.string().default('') }),
     execute: async ({ name, description }) => {
-      actions.addProject(name, description)
+      await actions.addProject(name, description)
       return { created: name }
     },
   }),
@@ -126,7 +126,7 @@ export const agentTools = {
     execute: async ({ task, project }) => {
       const t = task ? findTask(task) : undefined
       if (task && !t) return { error: `No task matches "${task}".` }
-      actions.startTimer({ taskId: t?.id ?? null, projectId: t ? undefined : findProjectId(project) })
+      await actions.startTimer({ taskId: t?.id ?? null, projectId: t ? undefined : findProjectId(project) })
       return { started: t?.title ?? project ?? 'stopwatch' }
     },
   }),
@@ -137,7 +137,7 @@ export const agentTools = {
     execute: async () => {
       const running = getState().entries.find((e) => e.endedAt === null)
       if (!running) return { message: 'No timer was running.' }
-      actions.stopTimer()
+      await actions.stopTimer()
       return { stopped: true, tracked: formatHours(Date.now() - running.startedAt) }
     },
   }),

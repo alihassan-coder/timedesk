@@ -26,41 +26,8 @@ interface State {
   activeId: string | null
 }
 
-const HOUR = 3_600_000
-const DAY = 24 * HOUR
+const DAY = 24 * 3_600_000
 const KEY = 'timedesk:chats'
-
-/** Dummy history so the review shows a populated sidebar. Replaced by real saved chats. */
-function seed(now: number): Conversation[] {
-  const m = (role: ChatMessage['role'], text: string, tools?: ToolTrace[]): ChatMessage => ({ id: crypto.randomUUID(), role, text, tools })
-  return [
-    {
-      id: 'c1',
-      title: 'Plan my week',
-      updatedAt: now - 2 * HOUR,
-      messages: [
-        m('user', 'Plan my week around what is due and keep Friday light.'),
-        m(
-          'assistant',
-          'Here is a plan that keeps Friday light:\n\nMon: finish the pricing table fix and send the Acme invoice (both overdue).\nTue: hero copy and PR reviews.\nWed: Acme sprint demo prep.\nThu: Capacitor Android build.\nFri: weekly review only.\n\nWant me to put these on your task list with due dates?',
-          [
-            { name: 'list_tasks', summary: 'Looked up 15 open tasks' },
-            { name: 'time_report', summary: 'Checked last week: 29h 57m tracked' },
-          ],
-        ),
-        m('user', 'Yes, do it.'),
-        m('assistant', 'Done. I set due dates on 5 tasks and added "Weekly review" for Friday.', [
-          { name: 'set_task_status', summary: 'Updated 5 tasks' },
-          { name: 'create_task', summary: 'Created "Weekly review"' },
-        ]),
-      ],
-    },
-    { id: 'c2', title: 'Acme invoice follow-up', updatedAt: now - 1 * DAY - HOUR, messages: [m('user', 'Draft a short follow-up about the Acme invoice.'), m('assistant', 'Hi team, a quick note that invoice #1042 is now due. Let me know if you need anything from our side.')] },
-    { id: 'c3', title: 'How much time on the mobile app?', updatedAt: now - 3 * DAY, messages: [m('user', 'How much time on the mobile app this month?'), m('assistant', '10h 34m this month, 36% of everything you tracked.', [{ name: 'time_report', summary: 'Built a monthly report' }])] },
-    { id: 'c4', title: 'Remember my working hours', updatedAt: now - 6 * DAY, messages: [m('user', 'I work 9 to 5, Sunday to Thursday.'), m('assistant', 'Saved. I will plan around Sunday to Thursday, 9 to 5.', [{ name: 'remember', summary: 'Saved to memory' }])] },
-    { id: 'c5', title: 'Ideas for the dashboard', updatedAt: now - 20 * DAY, messages: [m('user', 'Ideas to make the dashboard more useful?'), m('assistant', 'Show a daily goal ring, streaks, and what is due before your next meeting.')] },
-  ]
-}
 
 function load(): State {
   try {
@@ -69,7 +36,7 @@ function load(): State {
   } catch {
     // blocked or corrupt storage
   }
-  return { conversations: seed(Date.now()), activeId: null }
+  return { conversations: [], activeId: null }
 }
 
 let state = load()

@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:e2e": "node e2e/auth-flow.mjs"
+    "test:e2e": "node e2e/auth-flow.mjs",
+    "test:e2e:data": "node e2e/data-flow.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.96",

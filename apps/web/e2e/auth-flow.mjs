@@ -7,7 +7,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const CHROME = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
-const WEB = 'http://localhost:5173'
+const WEB = process.env.WEB_URL ?? 'http://localhost:5173'
+const API = process.env.API_URL ?? 'http://localhost:3001'
+// Safety: only ever run against the throwaway in-memory API, never a real database.
+const memory = await fetch(API + '/__memory').then((r) => r.ok).catch(() => false)
+if (!memory) {
+  console.error('Refusing to run: ' + API + ' is not the in-memory API. Start it with: pnpm --filter @timedesk/api dev:memory (use PORT and WEB_ORIGIN if 3001 is taken).')
+  process.exit(2)
+}
 const SHOTS = process.argv[2]
 const profile = mkdtempSync(join(tmpdir(), 'td-e2e-'))
 const chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--remote-debugging-port=9333', `--user-data-dir=${profile}`, '--window-size=1400,900', 'about:blank'], { stdio: 'ignore' })
