@@ -12,7 +12,9 @@ export function DesktopEffects() {
   const { entries, tasks, projects } = useStore()
   const running = entries.find((e) => e.endedAt === null)
   const runningRef = useRef(running)
-  runningRef.current = running
+  useEffect(() => {
+    runningRef.current = running
+  }, [running])
 
   // Timer in the tray tooltip.
   useEffect(() => {

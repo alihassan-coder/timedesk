@@ -9,7 +9,7 @@ import { useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
 import { TaskRow } from '@/features/task-row'
 import { useProfile } from '@/lib/auth-client'
-import { projectColor } from '@/lib/projects'
+import { projectColor } from '@/lib/project-colors'
 
 const trendConfig = { hours: { label: 'Hours', color: 'var(--chart-3)' } } satisfies ChartConfig
 

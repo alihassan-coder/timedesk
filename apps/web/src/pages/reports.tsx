@@ -15,7 +15,8 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
-import { projectColor, ProjectDot } from '@/lib/projects'
+import { projectColor } from '@/lib/project-colors'
+import { ProjectDot } from '@/components/project-dot'
 
 interface Bucket {
   label: string

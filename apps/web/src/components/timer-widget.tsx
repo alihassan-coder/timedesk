@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { actions, useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
-import { ProjectDot } from '@/lib/projects'
+import { ProjectDot } from '@/components/project-dot'
 
 /** The timer lives in the top bar on every page, like TimeCamp. */
 export function TimerWidget() {

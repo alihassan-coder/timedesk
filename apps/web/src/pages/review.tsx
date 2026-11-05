@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
-import { ProjectDot } from '@/lib/projects'
+import { ProjectDot } from '@/components/project-dot'
 
 const config = { hours: { label: 'Hours', color: 'var(--chart-3)' } } satisfies ChartConfig
 

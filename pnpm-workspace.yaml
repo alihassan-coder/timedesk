@@ -9,3 +9,6 @@ allowBuilds:
   electron-winstaller: false
   protobufjs: false
   active-win: true
+overrides:
+  # active-win's install tools (node-gyp, node-pre-gyp) pull in an old tar with known vulnerabilities.
+  tar: '>=7.5.21'

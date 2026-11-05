@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { cors } from 'hono/cors'
+import { secureHeaders } from 'hono/secure-headers'
 import { createControllers } from './controllers/index.ts'
 import { requireUser } from './middleware/auth.ts'
 import { createRoutes } from './routes/index.ts'
@@ -10,6 +12,11 @@ import { AppError } from './utils/errors.ts'
 /** Builds the whole HTTP API from its dependencies, so tests can plug in an in-memory database. */
 export function createApp(deps: Deps) {
   const app = new Hono<AppEnv>()
+
+  // Browser protections on every response (no sniffing, no framing, strict referrer, and so on).
+  app.use('*', secureHeaders({ crossOriginResourcePolicy: false }))
+  // Nothing legitimate here is bigger than a couple of megabytes; refuse the rest before reading it.
+  app.use('/v1/*', bodyLimit({ maxSize: 2 * 1024 * 1024, onError: (c) => c.json({ error: 'That request is too large.' }, 413) }))
 
   app.use('*', cors({ origin: deps.env.WEB_ORIGIN, credentials: true, allowHeaders: ['Content-Type', 'Authorization'] }))
 

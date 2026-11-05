@@ -92,18 +92,7 @@ function ChatView({ chatId, initial }: { chatId: string; initial: UIMessage[] })
   const [voiceMode, setVoiceMode] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
 
-  // The transport reads the latest model choice at send time.
-  const choice = useRef(ai.current)
-  choice.current = ai.current
-  const transport = useMemo(
-    () =>
-      new DefaultChatTransport({
-        api: `${API_URL}/v1/assistant/chat`,
-        credentials: 'include',
-        body: () => ({ provider: choice.current?.provider, model: choice.current?.model }),
-      }),
-    [],
-  )
+  const transport = useMemo(() => new DefaultChatTransport({ api: API_URL + '/v1/assistant/chat', credentials: 'include' }), [])
 
   const { messages, sendMessage, status, stop, error } = useChat({ id: chatId, messages: initial, transport })
   const busy = status === 'submitted' || status === 'streaming'
@@ -138,7 +127,8 @@ function ChatView({ chatId, initial }: { chatId: string; initial: UIMessage[] })
 
   const send = (text: string) => {
     window.speechSynthesis?.cancel()
-    void sendMessage({ text })
+    // The model choice travels with each message, so switching models mid-chat just works.
+    void sendMessage({ text }, { body: { provider: ai.current?.provider, model: ai.current?.model } })
   }
 
   const composer = (

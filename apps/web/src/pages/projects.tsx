@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { actions, useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
-import { ProjectDot } from '@/lib/projects'
+import { ProjectDot } from '@/components/project-dot'
 
 export default function ProjectsPage() {
   const { projects, tasks, entries } = useStore()

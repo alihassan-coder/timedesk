@@ -113,6 +113,13 @@ try {
     if (await ev(bodyHas('Welcome to timedesk'))) throw new Error('welcome card still shown after data exists')
     await shot('11-after-reload')
   })
+
+  await step('an unknown address shows a proper page-not-found screen with a way back', async () => {
+    await goto('/this-page-does-not-exist')
+    await waitFor(bodyHas('Page not found'), 'not found screen')
+    await clickText('Go to the dashboard')
+    await waitFor(bodyHas('Needs attention'), 'back on the dashboard')
+  })
 } catch (e) {
   results.push(`ERROR ${e.message}`)
 } finally {

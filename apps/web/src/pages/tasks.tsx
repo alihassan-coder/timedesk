@@ -20,8 +20,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { actions, useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
-import { dueLabel, PRIORITY_LABEL, STATUS_LABEL, StatusMenu, TaskRow } from '@/features/task-row'
-import { ProjectDot } from '@/lib/projects'
+import { dueLabel, PRIORITY_LABEL, STATUS_LABEL } from '@/features/task-labels'
+import { StatusMenu, TaskRow } from '@/features/task-row'
+import { ProjectDot } from '@/components/project-dot'
 
 type View = 'list' | 'board'
 

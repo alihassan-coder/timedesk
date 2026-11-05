@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
-import { ProjectDot } from '@/lib/projects'
+import { ProjectDot } from '@/components/project-dot'
 import { cn } from '@/lib/utils'
 
 const cell = (ms: number) => (ms === 0 ? '' : formatHours(ms))

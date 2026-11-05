@@ -1,5 +1,5 @@
 import { Repeat } from 'lucide-react'
-import { daysUntil, describeRecurrence, type Priority, type Task, type TaskStatus } from '@timedesk/shared'
+import { daysUntil, describeRecurrence, type Task, type TaskStatus } from '@timedesk/shared'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -10,25 +10,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { actions, useStore } from '@/data/store'
-import { ProjectDot } from '@/lib/projects'
+import { dueLabel, PRIORITY_LABEL, STATUS_LABEL } from '@/features/task-labels'
+import { ProjectDot } from '@/components/project-dot'
 import { cn } from '@/lib/utils'
 
-export const STATUS_LABEL: Record<TaskStatus, string> = {
-  todo: 'To do',
-  in_progress: 'In progress',
-  done: 'Done',
-}
-export const PRIORITY_LABEL: Record<Priority, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 const PRIORITY_VARIANT = { low: 'outline', medium: 'secondary', high: 'destructive' } as const
-
-export function dueLabel(due: string, now: number): string {
-  const d = daysUntil(due, now)
-  if (d === 0) return 'Today'
-  if (d === 1) return 'Tomorrow'
-  if (d === -1) return 'Yesterday'
-  const [y, m, day] = due.split('-').map(Number)
-  return new Date(y, m - 1, day).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
-}
 
 export function StatusMenu({ task }: { task: Task }) {
   return (

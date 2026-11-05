@@ -6,8 +6,11 @@ name: Desktop release
 # To release: bump "version" in apps/desktop/package.json, then
 #   git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
 #
-# One-time setup in the GitHub repo: Settings -> Secrets and variables -> Actions -> Variables ->
-#   TIMEDESK_WEB_URL = the address of your deployed web app (for example https://app.example.com)
+# One-time setup in the GitHub repo (Settings -> Secrets and variables -> Actions):
+#   Variable  TIMEDESK_WEB_URL     the address of your deployed web app, for example https://app.example.com
+#   Variable  REQUIRE_SIGNING      set to true once you have a certificate: an unsigned Windows build then FAILS
+#                                  instead of publishing an installer that shows the SmartScreen warning
+#   Signing   see docs/SIGNING.md  (Azure Artifact Signing, or a .pfx certificate)
 
 on:
   push:
@@ -56,3 +59,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TIMEDESK_WEB_URL: ${{ vars.TIMEDESK_WEB_URL }}
+          REQUIRE_SIGNING: ${{ matrix.os == 'windows-latest' && vars.REQUIRE_SIGNING || '' }}
+          # Windows signing, option A: Azure Artifact Signing
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGN_ENDPOINT: ${{ vars.AZURE_SIGN_ENDPOINT }}
+          AZURE_SIGN_ACCOUNT: ${{ vars.AZURE_SIGN_ACCOUNT }}
+          AZURE_SIGN_PROFILE: ${{ vars.AZURE_SIGN_PROFILE }}
+          AZURE_SIGN_PUBLISHER: ${{ vars.AZURE_SIGN_PUBLISHER }}
+          # Windows signing, option B: a .pfx certificate
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          TIMEDESK_PUBLISHER: ${{ vars.TIMEDESK_PUBLISHER }}
