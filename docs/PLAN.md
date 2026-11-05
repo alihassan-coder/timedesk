@@ -33,3 +33,8 @@ Time tracking + todos for a team of 3-5. One React codebase for web, desktop (El
 ## Open items
 - Domain / subdomains (owner is creating them): `app.` for web, `api.` for the API.
 - Neon project + `DATABASE_URL` (owner creates; goes in `apps/api/.env`, never committed).
+
+## Where data lives
+- **Database (Neon), source of truth:** accounts, projects, tasks, time entries, Tempo chats and messages, per-user settings, encrypted AI keys, mem0 memory.
+- **Browser, for speed only:** a per-user cache of tasks, projects, entries, chats and AI models (shown instantly, then refreshed from the server; wiped on sign out); appearance and assistant preferences (applied instantly, saved to the database); the login cookie.
+- **Never in the browser:** API keys, passwords.

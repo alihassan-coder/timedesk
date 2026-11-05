@@ -8,6 +8,7 @@ import {
   type TimeEntry,
 } from '@timedesk/shared'
 import { api, ApiError } from '@/lib/api'
+import { readCache, writeCache } from '@/lib/cache'
 
 /**
  * Data layer. Everything the screens show comes from the timedesk API (your Neon database) and is
@@ -28,10 +29,13 @@ interface State {
 
 const EMPTY: State = { projects: [], tasks: [], entries: [], ready: false, error: '' }
 let state: State = EMPTY
+let userId: string | null = null
 const listeners = new Set<() => void>()
 
 function set(next: Partial<State>) {
   state = { ...state, ...next }
+  // Keep a copy on this device so the next visit opens instantly.
+  if (userId && state.ready) writeCache('data', userId, { projects: state.projects, tasks: state.tasks, entries: state.entries })
   listeners.forEach((l) => l())
 }
 
@@ -77,6 +81,18 @@ const toEntry = (e: ApiEntry): TimeEntry => ({
 })
 const message = (e: unknown) => (e instanceof ApiError ? e.message : 'Could not reach the server.')
 
+/**
+ * Starts the data layer for a signed-in person: shows what this device cached last time right away,
+ * then refreshes from the server (the database stays the source of truth).
+ */
+export function bindStore(id: string) {
+  if (userId === id) return
+  userId = id
+  const cached = readCache<Pick<State, 'projects' | 'tasks' | 'entries'>>('data', id)
+  if (cached) set({ ...cached, ready: true, error: '' })
+  void loadStore()
+}
+
 /** Loads everything for the signed-in person. */
 export async function loadStore() {
   try {
@@ -93,6 +109,7 @@ export async function loadStore() {
 
 /** Forget everything, for example on sign out, so the next person never sees it. */
 export function resetStore() {
+  userId = null
   state = EMPTY
   listeners.forEach((l) => l())
 }

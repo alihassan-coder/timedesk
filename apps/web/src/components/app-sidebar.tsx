@@ -47,7 +47,10 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 import { resetStore } from '@/data/store'
+import { resetChats } from '@/features/assistant/chat-store'
 import { resetAi } from '@/lib/ai/server'
+import { clearAllCaches } from '@/lib/cache'
+import { stopSettingsSync } from '@/lib/settings-sync'
 import { navGroupsFor } from '@/lib/nav'
 import { authClient, useProfile } from '@/lib/auth-client'
 import { toggleMode, useAppearance } from '@/lib/appearance'
@@ -171,7 +174,7 @@ function ProfileMenu() {
               {dark ? 'Light mode' : 'Dark mode'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={async () => { await authClient.signOut(); resetStore(); resetAi(); navigate('/login', { replace: true }) }}>
+            <DropdownMenuItem onClick={async () => { await authClient.signOut(); resetStore(); resetAi(); resetChats(); stopSettingsSync(); clearAllCaches(); navigate('/login', { replace: true }) }}>
               <LogOut /> Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>

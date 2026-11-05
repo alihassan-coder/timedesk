@@ -117,6 +117,38 @@ try {
     await clickText('add a task: Buy milk')
     await waitFor(bodyHas('Done. I added that to your tasks.'), 'messages restored')
   })
+
+  await step('the chat is saved in the database: it survives wiping this browser completely', async () => {
+    await ev('localStorage.clear()')
+    await goto('/assistant')
+    await waitFor(bodyHas('add a task: Buy milk'), 'chat title comes back from the server')
+    await clickText('add a task: Buy milk')
+    await waitFor(bodyHas('Done. I added that to your tasks.'), 'messages load from the server')
+    await shot('23-chat-from-db')
+  })
+
+  await step('appearance follows you: a new accent colour is saved and restored on a wiped browser', async () => {
+    await goto('/settings')
+    await waitFor(exists('button[aria-label="Violet"]'), 'accent swatches')
+    await ev("document.querySelector('button[aria-label=\"Violet\"]').click()")
+    await waitFor('document.documentElement.dataset.accent === "violet"', 'violet applied locally')
+    await sleep(1500)
+    await ev('localStorage.clear()')
+    await goto('/')
+    await waitFor('document.documentElement.dataset.accent === "violet"', 'violet restored from the server', 12000)
+  })
+
+  await step('the app keeps a fast local copy of your data and wipes it on sign out', async () => {
+    await goto('/tasks')
+    await waitFor(bodyHas('Buy milk'), 'task visible')
+    await sleep(600)
+    if (!(await ev('Object.keys(localStorage).some((k) => k.startsWith("timedesk:cache:data:"))'))) throw new Error('no local data cache was written')
+    await ev('[...document.querySelectorAll("button")].find((b) => b.textContent.includes("Admin Boss")).click()')
+    await waitFor(bodyHas('Sign out'), 'menu open')
+    await clickText('Sign out')
+    await waitFor('location.pathname === "/login"', 'signed out')
+    if (await ev('Object.keys(localStorage).some((k) => k.startsWith("timedesk:cache:"))')) throw new Error('cached data was left behind after sign out')
+  })
 } catch (e) {
   results.push(`ERROR ${e.message}`)
 } finally {

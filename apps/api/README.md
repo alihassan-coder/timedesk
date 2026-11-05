@@ -17,7 +17,7 @@ src/
   validators/       zod schemas for every request body, query and param
   services/         Business rules and database access (one file per area)
   lib/models.ts     Builds the AI model from a provider + the user's own key (OpenAI, Anthropic, Gemini, Groq, xAI)
-  lib/memory.ts     Assistant memory: mem0 open source SDK on Neon pgvector (needs an OpenAI key for embeddings)
+  lib/memory.ts     Assistant memory: mem0 open source SDK on Neon pgvector (OpenAI or Gemini key for embeddings)
   utils/            errors (AppError), validate helpers, crypto (AES-256-GCM)
   types.ts          Deps (db, auth, env) and session types
 tests/              Run against the real app on an in-memory Postgres (PGlite) with the real migrations
@@ -43,4 +43,4 @@ pnpm --filter @timedesk/db db:migrate     apply migrations to the Neon database 
 
 `/health` · `/api/auth/*` (Better Auth: `sign-up/email`, `sign-in/username`, `sign-out`, `get-session`)
 Everything under `/v1` needs an approved account: `GET /me`, `/projects`, `/tasks`, `/time-entries` (+ `/running`, `/start`, `/stop`),
-`/ai/keys/:provider` (save/remove/list last4), `/assistant/models`, `/assistant/memories`, `POST /assistant/chat` (streams Tempo, the AI agent, with tools on your data and mem0 memory), and admin only: `/admin/users`, `/admin/users/:id/approve|reject`.
+`/chats` (list, get, put, delete: Tempo history in the database), `/settings` (appearance and assistant preferences that follow you across devices), `/ai/keys/:provider` (save/remove/list last4), `/assistant/models`, `/assistant/memories`, `POST /assistant/chat` (streams Tempo, the AI agent, with tools on your data and mem0 memory), and admin only: `/admin/users`, `/admin/users/:id/approve|reject`.

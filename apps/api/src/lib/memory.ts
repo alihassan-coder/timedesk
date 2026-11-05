@@ -34,23 +34,34 @@ export const noMemory: MemoryProvider = {
 }
 
 /**
- * mem0 needs an embeddings provider. For now that is OpenAI (text-embedding-3-small, 1536 dimensions);
- * without an OpenAI key, memory stays off and the assistant still works.
+ * mem0 needs an embeddings provider. Supported: OpenAI (text-embedding-3-small, 1536 dimensions) and Google
+ * Gemini (gemini-embedding-001 at 768 dimensions). OpenAI is preferred when both keys exist. Each setup has
+ * its own table, because vector sizes differ. Without either key, memory stays off and the assistant still works.
  */
+/** Which provider handles memory for these keys, or null when none can. Exported so it can be tested. */
+export function memorySetup(keys: ProviderKeys) {
+  if (keys.openai) return { embedder: 'openai' as const, apiKey: keys.openai, embeddingModel: 'text-embedding-3-small', dims: 1536, llmModel: 'gpt-4.1-mini' }
+  if (keys.google) return { embedder: 'gemini' as const, apiKey: keys.google, embeddingModel: 'gemini-embedding-001', dims: 768, llmModel: 'gemini-2.5-flash' }
+  return null
+}
+
 export function createMem0Memory(databaseUrl: string): MemoryProvider {
   const instances = new Map<string, Memory>()
 
   function instance(keys: ProviderKeys): Memory | null {
-    const apiKey = keys.openai
-    if (!apiKey) return null
-    const id = createHash('sha256').update(apiKey).digest('hex').slice(0, 16)
+    const setup = memorySetup(keys)
+    if (!setup) return null
+    const id = createHash('sha256').update(setup.apiKey).digest('hex').slice(0, 16)
     let m = instances.get(id)
     if (!m) {
       m = new Memory({
         version: 'v1.1',
-        embedder: { provider: 'openai', config: { apiKey, model: 'text-embedding-3-small', embeddingDims: 1536 } },
-        vectorStore: { provider: 'pgvector', config: { collectionName: 'timedesk_memories_1536', embeddingModelDims: 1536, dimension: 1536, connectionString: databaseUrl } },
-        llm: { provider: 'openai', config: { apiKey, model: 'gpt-4.1-mini' } },
+        embedder: { provider: setup.embedder, config: { apiKey: setup.apiKey, model: setup.embeddingModel, embeddingDims: setup.dims } },
+        vectorStore: {
+          provider: 'pgvector',
+          config: { collectionName: 'timedesk_memories_' + setup.dims, embeddingModelDims: setup.dims, dimension: setup.dims, connectionString: databaseUrl },
+        },
+        llm: { provider: setup.embedder, config: { apiKey: setup.apiKey, model: setup.llmModel } },
         disableHistory: true,
       })
       instances.set(id, m)
@@ -61,7 +72,7 @@ export function createMem0Memory(databaseUrl: string): MemoryProvider {
   const toItem = (r: { id: string; memory: string }): MemoryItem => ({ id: r.id, text: r.memory })
 
   return {
-    enabled: (keys) => !!keys.openai,
+    enabled: (keys) => memorySetup(keys) !== null,
     async search(userId, keys, query, limit = 5) {
       const m = instance(keys)
       if (!m) return []

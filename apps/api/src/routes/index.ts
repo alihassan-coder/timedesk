@@ -31,6 +31,14 @@ export function createRoutes(c: Controllers) {
   r.post('/time-entries/start', c.time.start)
   r.post('/time-entries/stop', c.time.stop)
 
+  r.get('/chats', c.chats.list)
+  r.get('/chats/:id', c.chats.get)
+  r.put('/chats/:id', c.chats.save)
+  r.delete('/chats/:id', c.chats.remove)
+
+  r.get('/settings', c.settings.get)
+  r.patch('/settings', c.settings.update)
+
   r.get('/assistant/models', c.assistant.models)
   r.get('/assistant/memories', c.assistant.memories)
   r.delete('/assistant/memories/:id', c.assistant.forget)

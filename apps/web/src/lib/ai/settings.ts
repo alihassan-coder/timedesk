@@ -67,3 +67,17 @@ export const aiActions = {
     set({ ...state, voice: { ...state.voice, ...patch } })
   },
 }
+
+// ---- used by settings-sync.ts to keep these preferences identical across devices ----
+export const getAiPrefs = () => state
+
+export function subscribeAiPrefs(cb: () => void) {
+  listeners.add(cb)
+  return () => {
+    listeners.delete(cb)
+  }
+}
+
+export function replaceAiPrefs(next: Partial<AiPrefs>) {
+  set({ ...DEFAULTS, ...next, voice: { ...DEFAULTS.voice, ...next.voice } })
+}

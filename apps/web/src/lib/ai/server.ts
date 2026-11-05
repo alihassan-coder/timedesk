@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { api, ApiError } from '@/lib/api'
+import { readCache, writeCache } from '@/lib/cache'
 import type { ProviderId } from './providers'
 import { aiActions, useAiPrefs } from './settings'
 
@@ -26,9 +27,11 @@ interface State {
 }
 
 let state: State = { loaded: false, keys: [], providers: [], memoryEnabled: false, error: '' }
+let userId: string | null = null
 const listeners = new Set<() => void>()
 function set(next: Partial<State>) {
   state = { ...state, ...next }
+  if (userId && state.loaded && !state.error) writeCache('ai', userId, { keys: state.keys, providers: state.providers, memoryEnabled: state.memoryEnabled })
   listeners.forEach((l) => l())
 }
 
@@ -45,6 +48,15 @@ export async function refreshAi() {
   }
 }
 
+/** Shows the cached keys and models at once (model lists are slow to fetch), then refreshes them. */
+export function bindAi(id: string) {
+  if (userId === id) return
+  userId = id
+  const cached = readCache<Pick<State, 'keys' | 'providers' | 'memoryEnabled'>>('ai', id)
+  if (cached) set({ ...cached, loaded: true, error: '' })
+  void refreshAi()
+}
+
 export async function saveKey(provider: ProviderId, key: string) {
   await api(`/ai/keys/${provider}`, { method: 'PUT', body: { key } })
   await refreshAi()
@@ -59,6 +71,7 @@ export const listMemories = () => api<{ memories: MemoryItem[] }>('/assistant/me
 export const forgetMemory = (id: string) => api(`/assistant/memories/${id}`, { method: 'DELETE' })
 
 export function resetAi() {
+  userId = null
   set({ loaded: false, keys: [], providers: [], memoryEnabled: false, error: '' })
 }
 

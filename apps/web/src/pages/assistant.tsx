@@ -76,7 +76,11 @@ export default function AssistantPage() {
           <ToolsPopover />
         </div>
 
-        <ChatView key={chatId} chatId={chatId} initial={active?.messages ?? []} />
+        {active && !active.loaded ? (
+          <p className="text-muted-foreground flex flex-1 items-center justify-center text-sm">Loading chat...</p>
+        ) : (
+          <ChatView key={chatId} chatId={chatId} initial={active?.messages ?? []} />
+        )}
       </section>
     </div>
   )

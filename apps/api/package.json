@@ -16,6 +16,7 @@
     "@ai-sdk/groq": "^4.0.76",
     "@ai-sdk/openai": "^4.0.108",
     "@ai-sdk/xai": "^5.0.38",
+    "@google/genai": "^2.32.0",
     "@hono/node-server": "^2.1.6",
     "@timedesk/db": "workspace:*",
     "@timedesk/shared": "workspace:*",

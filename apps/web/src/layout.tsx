@@ -8,15 +8,26 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from '@/co
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
-import { loadStore } from '@/data/store'
+import { bindStore } from '@/data/store'
+import { bindChats } from '@/features/assistant/chat-store'
+import { bindAi } from '@/lib/ai/server'
+import { useProfile } from '@/lib/auth-client'
+import { startSettingsSync } from '@/lib/settings-sync'
 import { toggleMode, useAppearance } from '@/lib/appearance'
 import { titleFor } from '@/lib/nav'
 
 export default function Layout() {
   const { pathname } = useLocation()
+  const { user } = useProfile()
+  const userId = user?.id
   useEffect(() => {
-    void loadStore()
-  }, [])
+    if (!userId) return
+    // Each part shows what this device cached, then syncs with the database.
+    bindStore(userId)
+    void bindChats(userId)
+    bindAi(userId)
+    void startSettingsSync(userId)
+  }, [userId])
   useAppearance() // re-render when the mode changes so the sun/moon icon updates
   const dark = document.documentElement.classList.contains('dark')
   return (

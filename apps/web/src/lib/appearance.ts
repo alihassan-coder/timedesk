@@ -88,3 +88,18 @@ export function toggleMode() {
   const dark = document.documentElement.classList.contains('dark')
   setAppearance({ mode: dark ? 'light' : 'dark' })
 }
+
+// ---- used by settings-sync.ts to keep appearance identical across devices ----
+export const getAppearance = () => current
+
+export function subscribeAppearance(cb: () => void) {
+  listeners.add(cb)
+  return () => {
+    listeners.delete(cb)
+  }
+}
+
+/** Applies a full appearance from the server. Missing fields fall back to the defaults. */
+export function replaceAppearance(next: Partial<Appearance>) {
+  setAppearance({ ...DEFAULT_APPEARANCE, ...next })
+}

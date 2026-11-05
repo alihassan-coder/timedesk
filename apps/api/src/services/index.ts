@@ -2,7 +2,9 @@ import type { Deps } from '../types.ts'
 import { createAdminService } from './admin.service.ts'
 import { createAiKeyService } from './ai-key.service.ts'
 import { createAssistantService } from './assistant.service.ts'
+import { createChatService } from './chat.service.ts'
 import { createProjectService } from './project.service.ts'
+import { createSettingsService } from './settings.service.ts'
 import { createTaskService } from './task.service.ts'
 import { createTimeService } from './time.service.ts'
 
@@ -15,6 +17,8 @@ export function createServices({ db, env, models, memory }: Deps) {
   return {
     admin: createAdminService(db),
     aiKeys,
+    chats: createChatService(db),
+    settings: createSettingsService(db),
     projects,
     tasks,
     time,

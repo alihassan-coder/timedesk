@@ -48,6 +48,21 @@ export function createControllers(s: Services) {
       stop: async (c: C) => c.json({ entry: await s.time.stop(c.get('user').id) }),
     },
 
+    chats: {
+      list: async (c: C) => c.json({ chats: await s.chats.list(c.get('user').id) }),
+      get: async (c: C) => c.json({ chat: await s.chats.get(c.get('user').id, parseParams(c, v.idParam).id) }),
+      save: async (c: C) => c.json(await s.chats.save(c.get('user').id, parseParams(c, v.idParam).id, await parseBody(c, v.saveChat))),
+      remove: async (c: C) => {
+        await s.chats.remove(c.get('user').id, parseParams(c, v.idParam).id)
+        return c.body(null, 204)
+      },
+    },
+
+    settings: {
+      get: async (c: C) => c.json(await s.settings.get(c.get('user').id)),
+      update: async (c: C) => c.json(await s.settings.merge(c.get('user').id, await parseBody(c, v.settingsPatch))),
+    },
+
     assistant: {
       models: async (c: C) => c.json(await s.assistant.modelsFor(c.get('user').id)),
       memories: async (c: C) => c.json({ memories: await s.assistant.memories(c.get('user').id) }),
