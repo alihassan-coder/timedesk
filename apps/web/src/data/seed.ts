@@ -125,37 +125,6 @@ export const team = [
   { id: 'u4', name: 'Hina Malik', initials: 'HM' },
 ]
 
-export interface ChatMessage {
-  id: string
-  channelId: string
-  userId: string
-  text: string
-  at: number
-}
-
-export const channels = [
-  { id: 'general', name: 'general' },
-  { id: 'p1', name: 'website-redesign' },
-  { id: 'p2', name: 'mobile-app' },
-]
-
-export function buildMessages(now: number): ChatMessage[] {
-  const m = (id: string, channelId: string, userId: string, text: string, minsAgo: number): ChatMessage => ({
-    id, channelId, userId, text, at: now - minsAgo * MIN,
-  })
-  return [
-    m('m1', 'general', 'u2', 'Morning all. Standup at 10:00, notes go in the shared task.', 190),
-    m('m2', 'general', 'u3', 'I will be 5 minutes late, joining from the train.', 175),
-    m('m3', 'general', 'u1', 'No problem. I will start with the website update.', 170),
-    m('m4', 'general', 'u4', 'Reminder: Acme invoice is due, can someone confirm the hours?', 95),
-    m('m5', 'p1', 'u2', 'Pricing table is overflowing on small phones. I logged it as a high priority task.', 300),
-    m('m6', 'p1', 'u1', 'On it. I will use a stacked layout under 640px.', 280),
-    m('m7', 'p1', 'u4', 'Hero copy draft is in the doc. Feedback welcome.', 60),
-    m('m8', 'p2', 'u3', 'Android build passes locally. iOS needs the developer account first.', 420),
-    m('m9', 'p2', 'u1', 'Let us keep push notifications for the next sprint.', 400),
-  ]
-}
-
 export const activity = (now: number) => [
   { id: 'a1', who: 'Sara Khan', text: 'completed', target: 'Reply to design feedback', at: now - 25 * MIN },
   { id: 'a2', who: 'You', text: 'tracked 1h 15m on', target: 'Website redesign', at: now - 50 * MIN },

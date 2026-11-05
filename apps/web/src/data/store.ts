@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { nextDue, type Priority, type Project, type Recurrence, type Task, type TaskStatus, type TimeEntry } from '@timedesk/shared'
-import { buildEntries, buildMessages, buildTasks, projects, type ChatMessage } from './seed'
+import { buildEntries, buildTasks, projects } from './seed'
 
 /**
  * IN-MEMORY store seeded with dummy data (resets on refresh). Every screen reads and writes
@@ -10,7 +10,6 @@ interface State {
   projects: Project[]
   tasks: Task[]
   entries: TimeEntry[]
-  messages: ChatMessage[]
 }
 
 const now0 = Date.now()
@@ -18,7 +17,6 @@ let state: State = {
   projects,
   tasks: buildTasks(now0),
   entries: buildEntries(now0),
-  messages: buildMessages(now0),
 }
 const listeners = new Set<() => void>()
 
@@ -26,6 +24,8 @@ function set(next: State) {
   state = next
   listeners.forEach((l) => l())
 }
+
+export const getState = () => state
 
 export function useStore(): State {
   return useSyncExternalStore(
@@ -90,9 +90,4 @@ export const actions = {
     set({ ...state, entries: state.entries.map((e) => (e.endedAt === null ? { ...e, endedAt: now } : e)) })
   },
 
-  sendMessage(channelId: string, text: string) {
-    const t = text.trim()
-    if (!t) return
-    set({ ...state, messages: [...state.messages, { id: newId(), channelId, userId: 'u1', text: t, at: Date.now() }] })
-  },
 }

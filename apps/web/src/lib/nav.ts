@@ -7,7 +7,7 @@ export type NavIcon =
   | 'review'
   | 'apps'
   | 'calendar'
-  | 'chat'
+  | 'assistant'
   | 'activity'
   | 'settings'
 
@@ -23,6 +23,7 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
     label: 'Work',
     items: [
       { to: '/', label: 'Dashboard', icon: 'dashboard' },
+      { to: '/assistant', label: 'Assistant', icon: 'assistant' },
       { to: '/tasks', label: 'Tasks', icon: 'tasks' },
       { to: '/projects', label: 'Projects', icon: 'projects' },
       { to: '/timesheet', label: 'Timesheet', icon: 'timesheet' },
@@ -40,7 +41,6 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
     label: 'Team',
     items: [
       { to: '/calendar', label: 'Calendar', icon: 'calendar' },
-      { to: '/chat', label: 'Chat', icon: 'chat', badge: '2' },
       { to: '/activity', label: 'Activity', icon: 'activity' },
     ],
   },

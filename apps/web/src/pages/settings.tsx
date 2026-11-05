@@ -1,4 +1,7 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
+import { useSearchParams } from 'react-router'
+import { Row } from '@/components/setting-row'
+import { AiTab } from '@/pages/settings-ai'
 import { Check, Monitor, Moon, RotateCcw, Sun } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { Segmented } from '@/components/segmented'
@@ -24,18 +27,6 @@ import {
 } from '@/lib/appearance'
 import { cn } from '@/lib/utils'
 
-function Row({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="max-w-md">
-        <p className="text-sm font-medium">{title}</p>
-        {description && <p className="text-muted-foreground text-sm">{description}</p>}
-      </div>
-      <div>{children}</div>
-    </div>
-  )
-}
-
 const ACCENTS: { id: Accent; label: string; color: string }[] = [
   { id: 'blue', label: 'Blue', color: 'oklch(0.546 0.245 262)' },
   { id: 'violet', label: 'Violet', color: 'oklch(0.54 0.25 293)' },
@@ -46,18 +37,23 @@ const ACCENTS: { id: Accent; label: string; color: string }[] = [
 ]
 
 export default function SettingsPage() {
+  const [params, setParams] = useSearchParams()
   return (
     <>
       <PageHeader title="Settings" description="Make timedesk look and behave the way you work." />
-      <Tabs defaultValue="appearance">
+      <Tabs value={params.get('tab') ?? 'appearance'} onValueChange={(v) => setParams({ tab: String(v) })}>
         <TabsList>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
+          <TabsTrigger value="ai">AI assistant</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="account">Account</TabsTrigger>
         </TabsList>
         <TabsContent value="appearance" className="pt-4">
           <AppearanceTab />
+        </TabsContent>
+        <TabsContent value="ai" className="pt-4">
+          <AiTab />
         </TabsContent>
         <TabsContent value="notifications" className="pt-4">
           <NotificationsTab />

@@ -10,14 +10,14 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
-  MessageSquare,
   Monitor,
   Moon,
   Settings,
+  Sparkles,
   Sun,
   Table2,
 } from 'lucide-react'
-import { LogoMark } from '@/components/logo'
+import { LogoMark, Wordmark } from '@/components/logo'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -58,7 +58,7 @@ const ICONS = {
   review: CalendarCheck,
   apps: Monitor,
   calendar: CalendarDays,
-  chat: MessageSquare,
+  assistant: Sparkles,
   activity: Activity,
   settings: Settings,
 }
@@ -72,9 +72,9 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link to="/" />}>
-              <LogoMark className="size-8 shrink-0" />
+              <LogoMark className="shrink-0" />
               <div className="grid flex-1 text-left leading-tight">
-                <span className="truncate font-semibold">timedesk</span>
+                <Wordmark className="truncate" />
                 <span className="text-muted-foreground truncate text-xs">Team of 4</span>
               </div>
             </SidebarMenuButton>

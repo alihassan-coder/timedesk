@@ -3,7 +3,7 @@ import Layout from '@/layout'
 import ActivityPage from '@/pages/activity'
 import AppsPage from '@/pages/apps'
 import CalendarPage from '@/pages/calendar'
-import ChatPage from '@/pages/chat'
+import AssistantPage from '@/pages/assistant'
 import Dashboard from '@/pages/dashboard'
 import DownloadPage from '@/pages/download'
 import ProjectsPage from '@/pages/projects'
@@ -26,7 +26,7 @@ export default function App() {
           <Route path="review" element={<ReviewPage />} />
           <Route path="apps" element={<AppsPage />} />
           <Route path="calendar" element={<CalendarPage />} />
-          <Route path="chat" element={<ChatPage />} />
+          <Route path="assistant" element={<AssistantPage />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="download" element={<DownloadPage />} />
