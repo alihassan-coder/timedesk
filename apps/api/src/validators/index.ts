@@ -58,10 +58,28 @@ export const settingsPatch = z
   .object({
     appearance: z.record(z.string(), z.unknown()).optional(),
     aiPrefs: z.record(z.string(), z.unknown()).optional(),
+    notifications: z.record(z.string(), z.unknown()).optional(),
+    desktop: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
   .refine((v) => JSON.stringify(v).length < 20_000, 'Settings are too large.')
 
+export const activityBatch = z.object({
+  samples: z
+    .array(
+      z.object({
+        id: z.string().min(8).max(64),
+        app: z.string().trim().min(1).max(120),
+        title: z.string().max(300).default(''),
+        startedAt: z.coerce.date(),
+        seconds: z.number().int().min(1).max(3600),
+      }),
+    )
+    .min(1)
+    .max(500),
+})
+
+export type ActivityBatch = z.infer<typeof activityBatch>
 export type SaveChat = z.infer<typeof saveChat>
 export type CreateProject = z.infer<typeof createProject>
 export type UpdateProject = z.infer<typeof updateProject>

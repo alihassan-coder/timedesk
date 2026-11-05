@@ -15,6 +15,11 @@ const schema = z.object({
         .map((e) => e.trim().toLowerCase())
         .filter(Boolean),
     ),
+  /** Set to "true" only if the web app and API are on different sites (for example two *.vercel.app addresses). Prefer subdomains of one domain. */
+  CROSS_SITE_COOKIES: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
   KEY_ENCRYPTION_SECRET: z.string().min(32, 'KEY_ENCRYPTION_SECRET must be at least 32 characters'),
 })
 

@@ -1,6 +1,7 @@
 import { api } from '@/lib/api'
 import { getAppearance, replaceAppearance, subscribeAppearance, type Appearance } from '@/lib/appearance'
 import { getAiPrefs, replaceAiPrefs, subscribeAiPrefs, type AiPrefs } from '@/lib/ai/settings'
+import { getNotifyPrefs, replaceNotifyPrefs, subscribeNotifyPrefs, type NotifyPrefs } from '@/lib/notify'
 
 /**
  * Keeps appearance and assistant preferences the same on every device, local-first:
@@ -10,7 +11,7 @@ import { getAiPrefs, replaceAiPrefs, subscribeAiPrefs, type AiPrefs } from '@/li
  *    made here while offline is uploaded.
  */
 interface Remote {
-  data: { appearance?: Partial<Appearance>; aiPrefs?: Partial<AiPrefs> }
+  data: { appearance?: Partial<Appearance>; aiPrefs?: Partial<AiPrefs>; notifications?: Partial<NotifyPrefs> }
   updatedAt: string | null
 }
 
@@ -40,7 +41,7 @@ export async function startSettingsSync(userId: string) {
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const upload = () =>
-    api('/settings', { method: 'PATCH', body: { appearance: getAppearance(), aiPrefs: getAiPrefs() } }).catch(() => {
+    api('/settings', { method: 'PATCH', body: { appearance: getAppearance(), aiPrefs: getAiPrefs(), notifications: getNotifyPrefs() } }).catch(() => {
       // offline: the local timestamp stays newer, so it uploads on the next start
     })
 
@@ -60,6 +61,7 @@ export async function startSettingsSync(userId: string) {
       applyingRemote = true
       if (remote.data.appearance) replaceAppearance(remote.data.appearance)
       if (remote.data.aiPrefs) replaceAiPrefs(remote.data.aiPrefs)
+      if (remote.data.notifications) replaceNotifyPrefs(remote.data.notifications)
       applyingRemote = false
       writeMeta(userId, remoteTime)
     } else if (!hasRemote || readMeta(userId) > remoteTime) {
@@ -71,9 +73,11 @@ export async function startSettingsSync(userId: string) {
 
   const offA = subscribeAppearance(onLocalChange)
   const offB = subscribeAiPrefs(onLocalChange)
+  const offC = subscribeNotifyPrefs(onLocalChange)
   stop = () => {
     offA()
     offB()
+    offC()
     clearTimeout(timer)
   }
 }

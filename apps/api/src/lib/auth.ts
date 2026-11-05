@@ -12,6 +12,8 @@ export interface AuthConfig {
   webOrigin: string
   /** These emails are made admin and approved automatically on registration. */
   adminEmails: string[]
+  /** Send the login cookie across sites (SameSite=None; Secure). Needs https. */
+  crossSiteCookies?: boolean
 }
 
 /**
@@ -28,6 +30,7 @@ export function createAuth(cfg: AuthConfig) {
     baseURL: cfg.baseURL,
     basePath: '/api/auth',
     trustedOrigins: [cfg.webOrigin],
+    advanced: cfg.crossSiteCookies ? { defaultCookieAttributes: { sameSite: 'none', secure: true } } : undefined,
     emailAndPassword: { enabled: true, minPasswordLength: 8, autoSignIn: false },
     plugins: [username()],
     user: {

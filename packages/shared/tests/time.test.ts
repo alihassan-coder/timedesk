@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dailyTotals, entryDuration, formatDuration, formatHours, overlapMs, periodStart, type TimeEntry } from '../src/index.ts'
+import { dailyTotals, entryDuration, formatDuration, formatHours, formatShort, overlapMs, periodStart, type TimeEntry } from '../src/index.ts'
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m - 1, d, h, min).getTime()
 const entry = (startedAt: number, endedAt: number | null): TimeEntry => ({ id: 'e', taskId: null, projectId: null, startedAt, endedAt })
@@ -13,6 +13,16 @@ describe('formatting', () => {
     expect(formatHours(5_400_000)).toBe('1h 30m')
     expect(formatHours(600_000)).toBe('10m')
     expect(formatHours(3_600_000)).toBe('1h 00m')
+  })
+})
+
+describe('short durations', () => {
+  it('shows seconds under a minute and hours and minutes above', () => {
+    expect(formatShort(35_000)).toBe('35s')
+    expect(formatShort(0)).toBe('0s')
+    expect(formatShort(59_400)).toBe('59s')
+    expect(formatShort(60_000)).toBe('1m')
+    expect(formatShort(5_400_000)).toBe('1h 30m')
   })
 })
 

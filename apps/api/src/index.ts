@@ -14,6 +14,7 @@ const auth = createAuth({
   baseURL: env.BETTER_AUTH_URL,
   webOrigin: env.WEB_ORIGIN,
   adminEmails: env.ADMIN_EMAILS,
+  crossSiteCookies: env.CROSS_SITE_COOKIES,
 })
 
 export default createApp({ db, auth, env, models: realModelFactory, memory: createMem0Memory(env.DATABASE_URL) })

@@ -47,6 +47,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 import { resetStore } from '@/data/store'
+import { isDesktop } from '@/lib/desktop'
 import { resetChats } from '@/features/assistant/chat-store'
 import { resetAi } from '@/lib/ai/server'
 import { clearAllCaches } from '@/lib/cache'
@@ -125,7 +126,7 @@ export function AppSidebar() {
 
 function GetAppCard() {
   const { state } = useSidebar()
-  if (state === 'collapsed') return null
+  if (state === 'collapsed' || isDesktop()) return null // already inside the desktop app
   return (
     <div className="bg-sidebar-accent/60 space-y-2 rounded-lg border p-3">
       <div className="flex items-center gap-2">

@@ -1,0 +1,58 @@
+name: Desktop release
+
+# Builds the Windows installer and the Linux AppImage + .deb, then publishes them as a GitHub Release.
+# The desktop app checks this same release for updates.
+#
+# To release: bump "version" in apps/desktop/package.json, then
+#   git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+#
+# One-time setup in the GitHub repo: Settings -> Secrets and variables -> Actions -> Variables ->
+#   TIMEDESK_WEB_URL = the address of your deployed web app (for example https://app.example.com)
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @timedesk/shared test
+      - run: pnpm --filter @timedesk/desktop test
+      - run: pnpm --filter @timedesk/desktop typecheck
+
+  release:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: release:win
+          - os: ubuntu-latest
+            script: release:linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build and publish installers
+        run: pnpm --filter @timedesk/desktop run ${{ matrix.script }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TIMEDESK_WEB_URL: ${{ vars.TIMEDESK_WEB_URL }}

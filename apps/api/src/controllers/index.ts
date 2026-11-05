@@ -48,6 +48,12 @@ export function createControllers(s: Services) {
       stop: async (c: C) => c.json({ entry: await s.time.stop(c.get('user').id) }),
     },
 
+    activity: {
+      ingest: async (c: C) => c.json(await s.activity.ingest(c.get('user').id, await parseBody(c, v.activityBatch)), 201),
+      summary: async (c: C) => c.json(await s.activity.summary(c.get('user').id, parseQuery(c, v.timeRange))),
+      clear: async (c: C) => c.json(await s.activity.clear(c.get('user').id)),
+    },
+
     chats: {
       list: async (c: C) => c.json({ chats: await s.chats.list(c.get('user').id) }),
       get: async (c: C) => c.json({ chat: await s.chats.get(c.get('user').id, parseParams(c, v.idParam).id) }),

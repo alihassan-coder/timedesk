@@ -15,6 +15,13 @@
       "when": 1793864154299,
       "tag": "0001_chats_and_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793869724721,
+      "tag": "0002_activity_samples",
+      "breakpoints": true
     }
   ]
 }

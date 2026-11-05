@@ -22,6 +22,11 @@ export function formatHours(ms: number): string {
   return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`
 }
 
+/** Like formatHours, but shows seconds under a minute: 35000 -> "35s". For small amounts such as app tracking. */
+export function formatShort(ms: number): string {
+  return ms < 60_000 ? `${Math.max(0, Math.round(ms / 1000))}s` : formatHours(ms)
+}
+
 /** Start (epoch ms, local time) of the day/month/quarter/year containing `at`. */
 export function periodStart(period: ReportPeriod, at: number): number {
   const d = new Date(at)

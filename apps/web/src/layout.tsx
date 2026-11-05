@@ -8,7 +8,10 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from '@/co
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { UpdateBanner } from '@/components/update-banner'
 import { bindStore } from '@/data/store'
+import { DesktopEffects } from '@/features/desktop-effects'
+import { useReminders } from '@/features/reminders'
 import { bindChats } from '@/features/assistant/chat-store'
 import { bindAi } from '@/lib/ai/server'
 import { useProfile } from '@/lib/auth-client'
@@ -28,12 +31,15 @@ export default function Layout() {
     bindAi(userId)
     void startSettingsSync(userId)
   }, [userId])
+  useReminders()
   useAppearance() // re-render when the mode changes so the sun/moon icon updates
   const dark = document.documentElement.classList.contains('dark')
   return (
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
+        <UpdateBanner />
+        <DesktopEffects />
         <header className="bg-background/80 sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4 backdrop-blur">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />

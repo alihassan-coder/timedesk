@@ -31,6 +31,10 @@ export function createRoutes(c: Controllers) {
   r.post('/time-entries/start', c.time.start)
   r.post('/time-entries/stop', c.time.stop)
 
+  r.post('/activity', c.activity.ingest)
+  r.get('/activity/summary', c.activity.summary)
+  r.delete('/activity', c.activity.clear)
+
   r.get('/chats', c.chats.list)
   r.get('/chats/:id', c.chats.get)
   r.put('/chats/:id', c.chats.save)

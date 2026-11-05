@@ -1,8 +1,10 @@
-import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { Row } from '@/components/setting-row'
 import { useProfile } from '@/lib/auth-client'
+import { isDesktop } from '@/lib/desktop'
 import { AiTab } from '@/pages/settings-ai'
+import { DesktopTab } from '@/pages/settings-desktop'
+import { NotificationsTab } from '@/pages/settings-notifications'
 import { Check, Monitor, Moon, RotateCcw, Sun } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { Segmented } from '@/components/segmented'
@@ -13,7 +15,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
-import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   resetAppearance,
@@ -47,6 +48,7 @@ export default function SettingsPage() {
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
           <TabsTrigger value="ai">AI assistant</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
+          {isDesktop() && <TabsTrigger value="desktop">Desktop</TabsTrigger>}
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="account">Account</TabsTrigger>
         </TabsList>
@@ -59,6 +61,11 @@ export default function SettingsPage() {
         <TabsContent value="notifications" className="pt-4">
           <NotificationsTab />
         </TabsContent>
+        {isDesktop() && (
+          <TabsContent value="desktop" className="pt-4">
+            <DesktopTab />
+          </TabsContent>
+        )}
         <TabsContent value="integrations" className="pt-4">
           <IntegrationsTab />
         </TabsContent>
@@ -203,65 +210,6 @@ function AppearanceTab() {
             <Checkbox defaultChecked /> Write homepage copy
           </div>
           <Progress value={64} />
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-function NotificationsTab() {
-  const [perm, setPerm] = useState<NotificationPermission | 'unsupported'>(
-    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
-  )
-  const [on, setOn] = useState<Record<string, boolean>>({
-    due: true,
-    summary: true,
-    longTimer: true,
-    review: false,
-    update: true,
-  })
-  const rows = [
-    { id: 'due', title: 'Due date reminders', description: 'When a task is due today or becomes overdue.' },
-    { id: 'summary', title: 'Daily summary', description: 'Every morning: what is due and how yesterday went.' },
-    { id: 'longTimer', title: 'Timer left running', description: 'When a timer has run for more than 4 hours.' },
-    { id: 'review', title: 'Weekly review', description: 'A Friday reminder to review your week.' },
-    { id: 'update', title: 'New version available', description: 'Desktop app only. Shown with a restart button.' },
-  ]
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>What to notify me about</CardTitle>
-          <CardDescription>Delivered on the desktop app, in this browser, and on mobile later.</CardDescription>
-        </CardHeader>
-        <CardContent className="divide-y">
-          {rows.map((r) => (
-            <Row key={r.id} title={r.title} description={r.description}>
-              <Switch checked={on[r.id]} onCheckedChange={(v) => setOn({ ...on, [r.id]: v })} aria-label={r.title} />
-            </Row>
-          ))}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>This browser</CardTitle>
-          <CardDescription>Browsers need your permission before showing notifications.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center gap-3">
-          {perm === 'unsupported' ? (
-            <span className="text-muted-foreground text-sm">This browser does not support notifications.</span>
-          ) : perm === 'granted' ? (
-            <Badge variant="secondary">Enabled</Badge>
-          ) : perm === 'denied' ? (
-            <span className="text-muted-foreground text-sm">Blocked. Allow notifications for this site in the browser settings.</span>
-          ) : (
-            <Button onClick={async () => setPerm(await Notification.requestPermission())}>Enable browser notifications</Button>
-          )}
-          {perm === 'granted' && (
-            <Button variant="outline" onClick={() => new Notification('timedesk', { body: 'Notifications are working.' })}>
-              Send a test
-            </Button>
-          )}
         </CardContent>
       </Card>
     </div>

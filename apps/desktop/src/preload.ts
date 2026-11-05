@@ -1,0 +1,33 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import { IPC, type DesktopSettings, type TimedeskBridge, type TimerState, type TrayAction, type UpdateStatus } from './bridge.ts'
+import type { ActivitySample } from './tracker.ts'
+
+/** The only thing the web page can reach. Everything goes through named, validated messages. */
+const bridge: TimedeskBridge = {
+  isDesktop: true,
+  info: () => ipcRenderer.invoke(IPC.info),
+  notify: (title: string, body: string) => ipcRenderer.invoke(IPC.notify, { title, body }),
+  setTimerState: (state: TimerState) => ipcRenderer.send(IPC.timer, state),
+  getSettings: () => ipcRenderer.invoke(IPC.getSettings),
+  setSettings: (patch: Partial<DesktopSettings>) => ipcRenderer.invoke(IPC.setSettings, patch),
+  setSignedIn: (signedIn: boolean) => ipcRenderer.send(IPC.signedIn, signedIn),
+  pullActivity: () => ipcRenderer.invoke(IPC.pull),
+  requeueActivity: (samples: ActivitySample[]) => ipcRenderer.send(IPC.requeue, samples),
+  getUpdateStatus: () => ipcRenderer.invoke(IPC.updateStatus),
+  checkForUpdates: () => ipcRenderer.invoke(IPC.checkUpdates),
+  installUpdate: () => ipcRenderer.send(IPC.installUpdate),
+  onUpdate(cb: (status: UpdateStatus) => void) {
+    const handler = (_: unknown, status: UpdateStatus) => cb(status)
+    ipcRenderer.on(IPC.updateEvent, handler)
+    return () => ipcRenderer.removeListener(IPC.updateEvent, handler)
+  },
+  onTrayAction(cb: (action: TrayAction) => void) {
+    const handler = (_: unknown, action: TrayAction) => cb(action)
+    ipcRenderer.on(IPC.trayAction, handler)
+    return () => ipcRenderer.removeListener(IPC.trayAction, handler)
+  },
+}
+
+contextBridge.exposeInMainWorld('timedesk', bridge)
+// Used only by the built-in "can't connect" page.
+contextBridge.exposeInMainWorld('timedeskOffline', { retry: () => ipcRenderer.send(IPC.retry) })

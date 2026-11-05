@@ -1,0 +1,28 @@
+export type {
+  ActivitySample,
+  AppInfo,
+  DesktopSettings,
+  TimedeskBridge,
+  TimerState,
+  TrayAction,
+  UpdateStatus,
+} from '@timedesk/shared'
+export { DEFAULT_DESKTOP_SETTINGS } from '@timedesk/shared'
+
+/** Names of the messages between the page and the desktop app. */
+export const IPC = {
+  info: 'timedesk:info',
+  notify: 'timedesk:notify',
+  timer: 'timedesk:timer',
+  getSettings: 'timedesk:settings:get',
+  setSettings: 'timedesk:settings:set',
+  signedIn: 'timedesk:signed-in',
+  pull: 'timedesk:activity:pull',
+  requeue: 'timedesk:activity:requeue',
+  updateStatus: 'timedesk:update:status',
+  checkUpdates: 'timedesk:update:check',
+  installUpdate: 'timedesk:update:install',
+  updateEvent: 'timedesk:update:event',
+  trayAction: 'timedesk:tray:action',
+  retry: 'timedesk:retry',
+} as const
