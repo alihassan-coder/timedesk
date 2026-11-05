@@ -11,6 +11,8 @@ Use GitHub: open the repository's **Security** tab and choose **Report a vulnera
 | **Passwords** | Hashed by Better Auth (scrypt). Never stored or logged in plain text. Minimum 8 characters |
 | **Accounts** | Every new account is `pending` and cannot sign in until an admin approves it. Only emails in `ADMIN_EMAILS` become admin automatically. An admin cannot change their own status |
 | **Sessions** | Better Auth session cookie: `HttpOnly`, `Secure` over https, `SameSite=Lax` (or `None` only if you turn on `CROSS_SITE_COOKIES`) |
+| **Desktop sign-in** | The desktop app signs in with a token, sent as `Authorization: Bearer`. The token is encrypted by the operating system (Windows DPAPI, Linux keyring) in a file only the app reads, never in page storage or cookies. Only the app's own pages can read it. Signing out ends it on the server |
+| **Bundled desktop interface** | Served from inside the app with a strict content policy: it can load only its own files and talk only to its own backend, and inline or remote scripts are blocked. The file server refuses any address that tries to leave the app's folder |
 | **Privacy between people** | Every query is scoped to the signed-in user. Tests prove one person cannot read, change or delete another person's tasks, projects, time, chats, settings, memories, keys or activity |
 | **AI provider keys** | Encrypted with AES-256-GCM using `KEY_ENCRYPTION_SECRET` before they are stored. The API never returns a stored key (only the last 4 characters). Keys are never put in the browser |
 | **App tracking** | Off until the person turns it on. Only runs while signed in and active. Window titles are visible to the owner only, with no team or admin view. One-click erase |

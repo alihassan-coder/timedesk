@@ -11,7 +11,7 @@ The timedesk desktop app for **Windows and Linux**. It opens the same web UI in 
 | Auto update | Checks GitHub Releases, downloads quietly, shows "Restart to update" |
 | Can't connect page | A friendly retry screen instead of a blank window |
 
-It does not bundle the web app: it loads your deployed one, so web and desktop always match and share the same login. Offline use needs the sync engine, which is a later step.
+The installer **contains its own copy of the web interface**, built from the same `apps/web` source as the website (no duplicated UI code). The app opens that copy from inside itself, so it opens even when the website is down. It talks to the same backend as the website. Because the app runs from its own address, it signs in with a **token** (kept encrypted by Windows or the Linux keyring, never in page storage) instead of a cookie. Offline use of your data needs the sync engine, which is a later step.
 
 ## Run it in development
 
@@ -20,9 +20,9 @@ pnpm dev                       # from the repo root: starts web + API
 pnpm --filter @timedesk/desktop dev
 ```
 
-By default the app opens `http://localhost:5173`. To point it elsewhere: `pnpm --filter @timedesk/desktop dev -- --web-url=https://app.example.com`.
+From source, `pnpm --filter @timedesk/desktop dev` builds the interface into `dist/app` and opens it, talking to the backend at `http://localhost:3001` (set `TIMEDESK_API_URL` to change that). To open a website address instead, for example the Vite dev server with hot reload: `pnpm --filter @timedesk/desktop dev -- --web-url=http://localhost:5173`.
 
-Where it looks for the web address, first match wins: `--web-url=` flag, `TIMEDESK_WEB_URL` environment variable, `config.json` in the app's data folder (`{"webUrl": "..."}`), the address baked in at build time, then `http://localhost:5173`.
+An address given on purpose always wins, first match: `--web-url=` flag, `TIMEDESK_WEB_URL` environment variable, `config.json` in the app's data folder (`{"webUrl": "..."}`). Otherwise the app opens its bundled interface.
 
 Try the update banner without publishing anything: `TIMEDESK_FAKE_UPDATE=0.2.0 pnpm --filter @timedesk/desktop dev`.
 
@@ -40,9 +40,9 @@ The end-to-end tests refuse to run unless they find the throwaway in-memory API 
 
 ## Build installers
 
-On **Windows**: `TIMEDESK_WEB_URL=https://app.example.com pnpm --filter @timedesk/desktop dist:win` writes `release/timedesk-Setup-<version>.exe` and `latest.yml`.
+On **Windows**: `TIMEDESK_API_URL=https://api.example.com pnpm --filter @timedesk/desktop dist:win` writes `release/timedesk-Setup-<version>.exe` and `latest.yml`. The backend address is compiled into the interface.
 
-**Linux installers cannot be built on Windows.** They are built on GitHub: `.github/workflows/desktop-release.yml` runs when you push a tag like `v0.1.0`, builds Windows + Linux (AppImage and .deb), and publishes them as a GitHub Release. Set the repo variable `TIMEDESK_WEB_URL` first. Details and a no-publish dry run are in [docs/DEPLOY.md](../../docs/DEPLOY.md).
+**Linux installers cannot be built on Windows.** They are built on GitHub: `.github/workflows/desktop-release.yml` runs when you push a tag like `v0.1.0`, builds Windows + Linux (AppImage and .deb), and publishes them as a GitHub Release. Set the repo variable `TIMEDESK_API_URL` first. Details and a no-publish dry run are in [docs/DEPLOY.md](../../docs/DEPLOY.md).
 
 Installers are not code-signed yet, so Windows SmartScreen shows "unrecognized app" (More info, Run anyway). A signing certificate fixes that later.
 

@@ -8,7 +8,7 @@ name: Desktop release
 # Try without publishing: Actions -> Desktop release -> Run workflow (builds everything, publishes nothing, keeps the files as artifacts).
 #
 # Repository settings used (Settings -> Secrets and variables -> Actions):
-#   Variable  TIMEDESK_WEB_URL   REQUIRED for a real release: the address the desktop app opens. Kept here so it is not in the code.
+#   Variable  TIMEDESK_API_URL   REQUIRED for a real release: the backend address the bundled app talks to (https://...). Kept here so it is not in the code.
 #   Variable  REQUIRE_SIGNING    optional: "true" makes an unsigned Windows build fail
 #   Signing   optional: see docs/SIGNING.md (AZURE_* or WIN_CSC_*)
 
@@ -42,16 +42,16 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: node scripts/release-notes.mjs check "${GITHUB_REF_NAME}"
 
-      - name: The app has an address to open
+      - name: The app knows which backend to talk to
         if: startsWith(github.ref, 'refs/tags/')
         env:
-          WEB_URL: ${{ vars.TIMEDESK_WEB_URL }}
+          API_URL: ${{ vars.TIMEDESK_API_URL }}
         run: |
-          if [ -z "$WEB_URL" ]; then
-            echo "::error::Set the repository variable TIMEDESK_WEB_URL (Settings -> Secrets and variables -> Actions -> Variables). Without it the installer would open localhost."
+          if [ -z "$API_URL" ]; then
+            echo "::error::Set the repository variable TIMEDESK_API_URL (Settings -> Secrets and variables -> Actions -> Variables). Without it the installer would talk to localhost."
             exit 1
           fi
-          case "$WEB_URL" in https://*) ;; *) echo "::error::TIMEDESK_WEB_URL must start with https://"; exit 1 ;; esac
+          case "$API_URL" in https://*) ;; *) echo "::error::TIMEDESK_API_URL must start with https://"; exit 1 ;; esac
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @timedesk/shared test
@@ -82,13 +82,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Build the app
+      - name: Build the app and its bundled interface (the same apps/web source as the website)
         working-directory: apps/desktop
         shell: bash
         run: node scripts/build.mjs
         env:
-          # A dry run (no tag) falls back to the local address, since nothing is published.
-          TIMEDESK_WEB_URL: ${{ vars.TIMEDESK_WEB_URL || 'http://localhost:5173' }}
+          # A dry run (no tag) falls back to the local backend, since nothing is published.
+          TIMEDESK_API_URL: ${{ vars.TIMEDESK_API_URL || 'http://localhost:3001' }}
 
       - name: Package the installers (not published here)
         working-directory: apps/desktop

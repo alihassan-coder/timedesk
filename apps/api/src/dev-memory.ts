@@ -15,7 +15,7 @@ import { mockModelFactory } from './dev-mock-model.ts'
 const port = Number(process.env.PORT ?? 3001)
 const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:5173'
 const db = await createTestDb()
-const auth = createAuth({ db, secret: 'dev-memory-secret-'.repeat(3), baseURL: `http://localhost:${port}`, webOrigin, adminEmails: ['admin@local.test'] })
+const auth = createAuth({ db, secret: 'dev-memory-secret-'.repeat(3), baseURL: `http://localhost:${port}`, webOrigin, desktopOrigin: 'app://timedesk', adminEmails: ['admin@local.test'] })
 const app = createApp({ db, auth, env: { WEB_ORIGIN: webOrigin, KEY_ENCRYPTION_SECRET: 'dev-memory-key-'.repeat(3) }, models: process.env.MOCK_AI ? mockModelFactory : realModelFactory, memory: noMemory })
 
 // Browser tests look for this route and refuse to run against anything else, so they can never hit a real database.

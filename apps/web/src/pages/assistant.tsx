@@ -11,7 +11,7 @@ import { HistoryPanel } from '@/features/assistant/history-panel'
 import { MessageView } from '@/features/assistant/message-view'
 import { MemoryPopover, ToolsPopover } from '@/features/assistant/popovers'
 import { loadStore } from '@/data/store'
-import { API_URL } from '@/lib/auth-client'
+import { API_URL, authHeaders } from '@/lib/auth-client'
 import { useAi } from '@/lib/ai/server'
 import { useAiPrefs } from '@/lib/ai/settings'
 
@@ -92,7 +92,7 @@ function ChatView({ chatId, initial }: { chatId: string; initial: UIMessage[] })
   const [voiceMode, setVoiceMode] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
 
-  const transport = useMemo(() => new DefaultChatTransport({ api: API_URL + '/v1/assistant/chat', credentials: 'include' }), [])
+  const transport = useMemo(() => new DefaultChatTransport({ api: API_URL + '/v1/assistant/chat', credentials: 'include', headers: () => authHeaders() }), [])
 
   const { messages, sendMessage, status, stop, error } = useChat({ id: chatId, messages: initial, transport })
   const busy = status === 'submitted' || status === 'streaming'

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0
+
+The desktop app now carries its own copy of the interface.
+
+### Desktop
+- The installer contains the web interface (built from the same `apps/web` source, no duplicated code) and opens it from inside the app. It no longer needs the website to be live to open
+- Sign-in uses a token instead of a cookie, so it works from the app and keeps working wherever the backend lives. The token is kept encrypted by Windows or the Linux keyring, never in page storage
+- Strict security policy on the bundled interface: it can only load its own files and talk to its own backend; inline and remote scripts are blocked
+- Opening an old v0.1.0 install updates it to this version automatically
+
+### API
+- Token sign-in alongside cookie sign-in, and the desktop app is a second trusted origin
+- Needs a redeploy of the API
+
+### Release
+- The release now needs the repository variable `TIMEDESK_API_URL` (the backend address). `TIMEDESK_WEB_URL` is no longer needed
+
 ## 0.1.0
 
 First complete version: web app, API and Windows/Linux desktop app.

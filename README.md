@@ -32,7 +32,7 @@ docs/         PLAN, PRODUCT, DEPLOY, SIGNING, research
 - **Database (Neon) is the source of truth.** The browser keeps a per-user cache so screens open instantly; it is wiped on sign out.
 - **AI keys never reach the browser.** They are encrypted (AES-256-GCM) in the database and used only by the API.
 - **API layers:** routes -> controllers -> services, with zod validators. Details in [apps/api/README.md](apps/api/README.md).
-- **Desktop** loads your deployed web app, so web and desktop always match. Details in [apps/desktop/README.md](apps/desktop/README.md).
+- **Desktop** carries its own copy of the interface, built from the same `apps/web` source (no duplicated UI code), and talks to the same API. It signs in with a token kept in the operating system's keychain. Details in [apps/desktop/README.md](apps/desktop/README.md).
 
 ## Run it on your computer
 

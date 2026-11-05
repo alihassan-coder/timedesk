@@ -13,6 +13,7 @@ const auth = createAuth({
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
   webOrigin: env.WEB_ORIGIN,
+  desktopOrigin: env.DESKTOP_ORIGIN,
   adminEmails: env.ADMIN_EMAILS,
   crossSiteCookies: env.CROSS_SITE_COOKIES,
 })

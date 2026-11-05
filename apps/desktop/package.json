@@ -1,7 +1,7 @@
 {
   "name": "@timedesk/desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "timedesk desktop app for Windows and Linux",
   "author": "timedesk",
   "homepage": "https://github.com/alihassan-coder/timedesk",

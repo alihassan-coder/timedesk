@@ -4,6 +4,7 @@ export type {
   DesktopSettings,
   TimedeskBridge,
   TimerState,
+  TokenStore,
   TrayAction,
   UpdateStatus,
 } from '@timedesk/shared'
@@ -24,5 +25,8 @@ export const IPC = {
   installUpdate: 'timedesk:update:install',
   updateEvent: 'timedesk:update:event',
   trayAction: 'timedesk:tray:action',
+  tokenGet: 'timedesk:token:get',
+  tokenSet: 'timedesk:token:set',
+  tokenClear: 'timedesk:token:clear',
   retry: 'timedesk:retry',
 } as const

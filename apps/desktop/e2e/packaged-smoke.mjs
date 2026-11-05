@@ -5,7 +5,10 @@
 import { spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
 const WEB = process.env.WEB_URL ?? 'http://localhost:5173'
 const exe = process.argv[2] ?? new URL('../release/win-unpacked/timedesk.exe', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -14,7 +17,7 @@ const results = []
 
 const env = { ...process.env, TIMEDESK_USER_DATA: mkdtempSync(join(tmpdir(), 'td-packaged-')), TIMEDESK_IDLE_LIMIT_SECONDS: '999999' }
 delete env.ELECTRON_RUN_AS_NODE
-const child = spawn(exe, [`--web-url=${WEB}`, '--remote-debugging-port=9342'], { env, stdio: 'ignore' })
+const child = spawn(exe, ['--remote-debugging-port=9342'], { env, stdio: 'ignore' })
 
 try {
   let ws
@@ -38,11 +41,11 @@ try {
   const step = async (name, fn) => { try { await fn(); results.push('PASS  ' + name) } catch (e) { results.push(`FAIL  ${name}: ${e.message}`) } }
 
   await step('starts and loads the web app inside the packaged window', async () => {
-    await waitFor('document.body && document.body.innerText.includes("Sign in")', 'login page')
+    await waitFor('document.body && document.body.innerText.includes("Sign in") && location.origin === "app://timedesk"', 'login page served from inside the app')
   })
-  await step('the bridge reports a packaged app with the right version', async () => {
+  await step('the bridge reports a packaged app as the bundled app with the right version', async () => {
     const info = await ev('window.timedesk.info()')
-    if (!info?.packaged || info.version !== '0.1.0') throw new Error(JSON.stringify(info))
+    if (!info?.packaged || info.version !== VERSION || info.mode !== 'bundled') throw new Error(JSON.stringify(info))
   })
   await step('app tracking works from the packaged archive (native helper found)', async () => {
     await ev('window.timedesk.setSettings({ trackApps: true })')

@@ -19,6 +19,7 @@ Three things get deployed from this repo: the **API** and the **web app** (two s
 | `WEB_ORIGIN` | The public address of the web app, for example `https://app.example.com` (no trailing slash) |
 | `ADMIN_EMAILS` | Comma-separated emails that become admin and are approved when they register, for example `you@example.com,teammate@example.com` |
 | `KEY_ENCRYPTION_SECRET` | 32+ random characters. **Never change it after people save AI keys**, or the saved keys become unreadable. If you share a database between environments, use the same value in all of them |
+| `DESKTOP_ORIGIN` | Optional. The desktop app's own address, `app://timedesk` by default. Leave it unless you change the app |
 | `CROSS_SITE_COOKIES` | Leave empty with subdomains of one domain (see section 3) |
 
 5. Check: open `https://<api>/health`. It must answer `{"ok":true}`.
@@ -60,7 +61,7 @@ Tempo's memory (mem0) needs the `vector` extension. If memory errors, run in the
 
 The workflow `.github/workflows/desktop-release.yml` builds the Windows installer, the Linux AppImage and the `.deb`, and publishes them as a GitHub Release. Installed apps check that release and update themselves. This needs a **public** repository (or a separate public releases repository); a private one cannot serve anonymous downloads or updates.
 
-**One-time setup** (repository admin): Settings -> Secrets and variables -> Actions -> **Variables** -> add `TIMEDESK_WEB_URL` = the address of your web app. It is stored there, not in the code, and the release refuses to run without it. Also check Settings -> Actions -> General -> Workflow permissions allows the workflow to publish (the publish job asks for `contents: write`).
+**One-time setup** (repository admin): Settings -> Secrets and variables -> Actions -> **Variables** -> add `TIMEDESK_API_URL` = the public address of your API (`https://...`). The installer contains its own copy of the interface and talks to that backend; the address is compiled into it. It is stored there, not in the code, and the release refuses to run without it. Also check Settings -> Actions -> General -> Workflow permissions allows the workflow to publish (the publish job asks for `contents: write`). The API must be redeployed with the token-login support before 0.2.0 installs can sign in.
 
 **Try it without publishing:** Actions -> Desktop release -> Run workflow. It builds Windows and Linux and keeps the files as downloadable artifacts for 14 days.
 
@@ -77,7 +78,7 @@ git push origin v0.1.0
 
 The workflow checks that the tag, the app version and the changelog agree, runs the tests, builds both systems, writes `SHA256SUMS.txt`, and creates the release with notes and install instructions. A second release for the same tag is refused.
 
-A Windows build on your own machine: `TIMEDESK_WEB_URL=https://app.example.com pnpm --filter @timedesk/desktop dist:win`. Code signing (removes the Windows "Unknown publisher" warning) is in [SIGNING.md](SIGNING.md).
+A Windows build on your own machine: `TIMEDESK_API_URL=https://api.example.com pnpm --filter @timedesk/desktop dist:win`. Code signing (removes the Windows "Unknown publisher" warning) is in [SIGNING.md](SIGNING.md).
 
 ## Checklist
 
@@ -88,4 +89,4 @@ A Windows build on your own machine: `TIMEDESK_WEB_URL=https://app.example.com p
 - [ ] A provider key saves and Tempo answers
 - [ ] `CROSS_SITE_COOKIES` empty if you use subdomains
 - [ ] `KEY_ENCRYPTION_SECRET` stored somewhere safe
-- [ ] Repository variable `TIMEDESK_WEB_URL` set before the first release
+- [ ] Repository variable `TIMEDESK_API_URL` set before the first release

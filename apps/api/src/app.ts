@@ -18,7 +18,9 @@ export function createApp(deps: Deps) {
   // Nothing legitimate here is bigger than a couple of megabytes; refuse the rest before reading it.
   app.use('/v1/*', bodyLimit({ maxSize: 2 * 1024 * 1024, onError: (c) => c.json({ error: 'That request is too large.' }, 413) }))
 
-  app.use('*', cors({ origin: deps.env.WEB_ORIGIN, credentials: true, allowHeaders: ['Content-Type', 'Authorization'] }))
+  // The website (cookie login) and the bundled desktop app (token login) may call the API. Nobody else.
+  const origins = [deps.env.WEB_ORIGIN, deps.env.DESKTOP_ORIGIN ?? 'app://timedesk']
+  app.use('*', cors({ origin: origins, credentials: true, allowHeaders: ['Content-Type', 'Authorization'], exposeHeaders: ['set-auth-token'] }))
 
   app.get('/health', (c) => c.json({ ok: true }))
 

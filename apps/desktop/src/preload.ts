@@ -5,6 +5,11 @@ import type { ActivitySample } from './tracker.ts'
 /** The only thing the web page can reach. Everything goes through named, validated messages. */
 const bridge: TimedeskBridge = {
   isDesktop: true,
+  tokens: {
+    get: () => ipcRenderer.invoke(IPC.tokenGet),
+    set: (token: string) => ipcRenderer.invoke(IPC.tokenSet, token),
+    clear: () => ipcRenderer.invoke(IPC.tokenClear),
+  },
   info: () => ipcRenderer.invoke(IPC.info),
   notify: (title: string, body: string) => ipcRenderer.invoke(IPC.notify, { title, body }),
   setTimerState: (state: TimerState) => ipcRenderer.send(IPC.timer, state),

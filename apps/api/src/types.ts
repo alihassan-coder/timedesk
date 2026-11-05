@@ -12,7 +12,7 @@ export interface Deps {
   models: ModelFactory
   /** Long-term assistant memory (mem0 in production, a fake in tests). */
   memory: MemoryProvider
-  env: Pick<Env, 'WEB_ORIGIN' | 'KEY_ENCRYPTION_SECRET'>
+  env: Pick<Env, 'WEB_ORIGIN' | 'KEY_ENCRYPTION_SECRET'> & { DESKTOP_ORIGIN?: string }
 }
 
 export interface SessionUser {

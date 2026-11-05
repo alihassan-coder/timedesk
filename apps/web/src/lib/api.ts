@@ -1,4 +1,4 @@
-import { API_URL } from './auth-client'
+import { API_URL, authHeaders } from './auth-client'
 
 export class ApiError extends Error {
   status: number
@@ -15,7 +15,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   const res = await fetch(`${API_URL}/v1${path}`, {
     method: init.method ?? 'GET',
     credentials: 'include',
-    headers: init.body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: { ...authHeaders(), ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   })
   if (res.status === 204) return undefined as T

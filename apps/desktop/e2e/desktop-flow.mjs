@@ -6,7 +6,10 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import electron from 'electron'
+
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
 const WEB = process.env.WEB_URL ?? 'http://localhost:5173'
 const API = process.env.API_URL ?? 'http://localhost:3001'
@@ -73,8 +76,8 @@ try {
   await step('the page is running inside the desktop app and can talk to it', async () => {
     if (!(await cdp.ev('window.timedesk?.isDesktop === true'))) throw new Error('window.timedesk bridge is missing')
     const info = await cdp.ev('window.timedesk.info()')
-    if (info.version !== '0.1.0' || info.packaged !== false) throw new Error('unexpected app info: ' + JSON.stringify(info))
-    if (info.webUrl !== WEB) throw new Error('web address was ' + info.webUrl)
+    if (info.version !== VERSION || info.packaged !== false || info.mode !== 'remote') throw new Error('unexpected app info: ' + JSON.stringify(info))
+    if (info.startUrl !== WEB) throw new Error('web address was ' + info.startUrl)
   }, h)
 
   await step('register, then sign in from the desktop window', async () => {

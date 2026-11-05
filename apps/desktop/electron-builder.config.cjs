@@ -32,7 +32,7 @@ module.exports = {
   asarUnpack: ['node_modules/active-win/**'],
 
   win: {
-    icon: 'build/icon.png',
+    icon: 'build/icon.ico',
     target: [{ target: 'nsis', arch: ['x64'] }],
     forceCodeSigning: requireSigning,
     ...(azure ? { azureSignOptions: azure } : {}),

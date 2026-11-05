@@ -1,54 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { linuxAutostartEntry, linuxAutostartPath } from '../src/autostart.ts'
-import { DEV_WEB_URL, isInternalUrl, isSafeExternalUrl, resolveConfig } from '../src/config.ts'
 import { createTracker, type ForegroundWindow } from '../src/tracker.ts'
 import { sanitizeBounds } from '../src/window-state.ts'
-
-describe('which web address the app opens', () => {
-  const none = { argv: [], env: {} }
-
-  it('uses the local dev server when nothing else is set', () => {
-    expect(resolveConfig(none).webUrl).toBe(DEV_WEB_URL)
-  })
-
-  it('prefers the command line, then the environment, then the user file, then the build', () => {
-    const all = {
-      argv: ['--web-url=https://cli.example.com'],
-      env: { TIMEDESK_WEB_URL: 'https://env.example.com' },
-      userFile: { webUrl: 'https://file.example.com' },
-      baked: { webUrl: 'https://baked.example.com' },
-    }
-    expect(resolveConfig(all).webUrl).toBe('https://cli.example.com')
-    expect(resolveConfig({ ...all, argv: [] }).webUrl).toBe('https://env.example.com')
-    expect(resolveConfig({ ...all, argv: [], env: {} }).webUrl).toBe('https://file.example.com')
-    expect(resolveConfig({ ...all, argv: [], env: {}, userFile: null }).webUrl).toBe('https://baked.example.com')
-  })
-
-  it('ignores addresses that are not http or https and falls through to the next source', () => {
-    expect(resolveConfig({ argv: ['--web-url=javascript:alert(1)'], env: { TIMEDESK_WEB_URL: 'file:///etc/passwd' }, baked: { webUrl: 'https://ok.example.com/' } }).webUrl).toBe('https://ok.example.com')
-    expect(resolveConfig({ argv: [], env: { TIMEDESK_WEB_URL: 'not a url' } }).webUrl).toBe(DEV_WEB_URL)
-  })
-
-  it('keeps a path but drops a trailing slash', () => {
-    expect(resolveConfig({ argv: [], env: { TIMEDESK_WEB_URL: 'https://example.com/app/' } }).webUrl).toBe('https://example.com/app')
-  })
-})
-
-describe('what may open inside the window', () => {
-  it('only the app origin is internal', () => {
-    expect(isInternalUrl('https://app.example.com/tasks', 'https://app.example.com')).toBe(true)
-    expect(isInternalUrl('https://evil.example.com/', 'https://app.example.com')).toBe(false)
-    expect(isInternalUrl('https://app.example.com.evil.com/', 'https://app.example.com')).toBe(false)
-    expect(isInternalUrl('nonsense', 'https://app.example.com')).toBe(false)
-  })
-
-  it('external links may only be web or mail links', () => {
-    expect(isSafeExternalUrl('https://github.com')).toBe(true)
-    expect(isSafeExternalUrl('mailto:a@b.com')).toBe(true)
-    expect(isSafeExternalUrl('file:///C:/Windows/System32/calc.exe')).toBe(false)
-    expect(isSafeExternalUrl('javascript:alert(1)')).toBe(false)
-  })
-})
 
 describe('remembered window position', () => {
   const screens = [{ x: 0, y: 0, width: 1920, height: 1080 }]

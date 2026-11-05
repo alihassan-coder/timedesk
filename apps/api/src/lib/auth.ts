@@ -1,7 +1,7 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { APIError } from 'better-auth/api'
-import { username } from 'better-auth/plugins'
+import { bearer, username } from 'better-auth/plugins'
 import { eq } from 'drizzle-orm'
 import { schema, type Db } from '@timedesk/db'
 
@@ -10,6 +10,8 @@ export interface AuthConfig {
   secret: string
   baseURL: string
   webOrigin: string
+  /** The desktop app's own origin. It signs in with a token instead of a cookie. */
+  desktopOrigin?: string
   /** These emails are made admin and approved automatically on registration. */
   adminEmails: string[]
   /** Send the login cookie across sites (SameSite=None; Secure). Needs https. */
@@ -29,10 +31,11 @@ export function createAuth(cfg: AuthConfig) {
     secret: cfg.secret,
     baseURL: cfg.baseURL,
     basePath: '/api/auth',
-    trustedOrigins: [cfg.webOrigin],
+    trustedOrigins: [cfg.webOrigin, ...(cfg.desktopOrigin ? [cfg.desktopOrigin] : [])],
     advanced: cfg.crossSiteCookies ? { defaultCookieAttributes: { sameSite: 'none', secure: true } } : undefined,
     emailAndPassword: { enabled: true, minPasswordLength: 8, autoSignIn: false },
-    plugins: [username()],
+    // bearer(): sign-in also returns a token (header set-auth-token) that the desktop app sends as Authorization: Bearer.
+    plugins: [username(), bearer()],
     user: {
       additionalFields: {
         role: { type: 'string', required: false, defaultValue: 'member', input: false },

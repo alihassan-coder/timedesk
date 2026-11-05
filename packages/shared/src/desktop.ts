@@ -27,10 +27,13 @@ export interface DesktopSettings {
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = { autoStart: false, closeToTray: true, trackApps: false, trackTitles: true }
 
 export interface AppInfo {
+  /** "bundled": the app opens its own copy of the interface. "remote": it opens a website address (development). */
+  mode: 'bundled' | 'remote'
   version: string
   platform: string
   packaged: boolean
-  webUrl: string
+  /** What the window opened: the bundled app address, or the website address. */
+  startUrl: string
 }
 
 export type UpdateStatus =
@@ -47,8 +50,16 @@ export interface TimerState {
 
 export type TrayAction = 'toggle-timer'
 
+/** The login token, kept encrypted by the operating system (Windows DPAPI, Linux keyring), never in page storage. */
+export interface TokenStore {
+  get(): Promise<string | null>
+  set(token: string): Promise<void>
+  clear(): Promise<void>
+}
+
 export interface TimedeskBridge {
   isDesktop: true
+  tokens: TokenStore
   info(): Promise<AppInfo>
   notify(title: string, body: string): Promise<void>
   setTimerState(state: TimerState): void

@@ -20,6 +20,8 @@ const schema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true'),
+  /** Origin of the bundled desktop app. It uses token login, so this rarely needs changing. */
+  DESKTOP_ORIGIN: z.string().default('app://timedesk'),
   KEY_ENCRYPTION_SECRET: z.string().min(32, 'KEY_ENCRYPTION_SECRET must be at least 32 characters'),
 })
 

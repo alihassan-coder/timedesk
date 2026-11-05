@@ -1,17 +1,23 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { BrowserWindow, Notification, app, ipcMain, nativeImage, powerMonitor, screen, session, shell } from 'electron'
+import { BrowserWindow, Notification, app, ipcMain, nativeImage, net, powerMonitor, protocol, safeStorage, screen, session, shell } from 'electron'
+import { pathToFileURL } from 'node:url'
+import { resolveAppFile } from './app-files.ts'
 import { linuxAutostartEntry, linuxAutostartPath } from './autostart.ts'
 import { DEFAULT_DESKTOP_SETTINGS, IPC, type AppInfo, type DesktopSettings, type TimerState, type UpdateStatus } from './bridge.ts'
-import { isInternalUrl, isSafeExternalUrl, resolveConfig } from './config.ts'
+import { APP_ORIGIN, contentSecurityPolicy, isInternalUrl, isSafeExternalUrl, resolveConfig } from './config.ts'
 import { createTracker, type ActivitySample, type ForegroundWindow } from './tracker.ts'
 import { createTray } from './tray.ts'
 import { setupUpdater } from './updater.ts'
 import { sanitizeBounds, type Bounds } from './window-state.ts'
 
-const APP_ID = 'com.timedesk.app'
+// Running from source gets its own ID, so Windows never mixes it up with (or reuses a stale icon from) an installed copy.
+const APP_ID = app.isPackaged ? 'com.timedesk.app' : 'com.timedesk.app.dev'
 const startHidden = process.argv.includes('--hidden')
+
+// The bundled interface is served from app://timedesk. It must be declared before the app is ready.
+protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
 if (process.env.TIMEDESK_USER_DATA) app.setPath('userData', process.env.TIMEDESK_USER_DATA)
 app.setAppUserModelId(APP_ID) // needed for Windows notifications
@@ -44,6 +50,7 @@ const config = resolveConfig({
   env: process.env,
   userFile: readJson(userFile('config.json')),
   baked: readJson(join(__dirname, 'desktop-config.json')),
+  hasBundledUi: existsSync(join(__dirname, 'app', 'index.html')),
 })
 
 let settings: DesktopSettings = { ...DEFAULT_DESKTOP_SETTINGS, ...(readJson<Partial<DesktopSettings>>(userFile('settings.json')) ?? {}) }
@@ -120,10 +127,14 @@ function createWindow() {
     show: false,
     title: 'timedesk',
     backgroundColor: '#0a0a0a',
-    icon: nativeImage.createFromPath(asset('icon.png')),
+    // Windows needs a real .ico for the taskbar and title bar; Linux uses the PNG.
+    icon: nativeImage.createFromPath(asset(process.platform === 'win32' ? 'icon.ico' : 'icon.png')),
     autoHideMenuBar: true,
     webPreferences: { preload: asset('preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
   })
+  // With our own app ID, Windows takes the taskbar icon from the app details, not the window: set it explicitly so the
+  // timedesk logo shows (not the Electron atom) in development and in the installed app.
+  if (process.platform === 'win32') win.setAppDetails({ appId: APP_ID, appIconPath: asset('icon.ico'), appIconIndex: 0 })
   if (bounds.maximized) win.maximize()
   win.once('ready-to-show', () => {
     if (!startHidden) win?.show()
@@ -149,7 +160,7 @@ function createWindow() {
 
   // Only the timedesk site may load here. Other links open in the normal browser.
   win.webContents.on('will-navigate', (e, url) => {
-    if (isInternalUrl(url, config.webUrl) || url.startsWith('file:')) return
+    if (isInternalUrl(url, config.startUrl) || url.startsWith('file:')) return
     e.preventDefault()
     if (isSafeExternalUrl(url)) void shell.openExternal(url)
   })
@@ -161,13 +172,14 @@ function createWindow() {
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return // -3 = cancelled, not a real failure
     log(`could not load ${url}: ${desc}`)
-    void win?.loadFile(asset('offline.html'), { query: { url: config.webUrl } })
+    // The bundled interface needs no network to open, so this page is only for a website address (development).
+    if (config.mode === 'remote') void win?.loadFile(asset('offline.html'), { query: { url: config.startUrl } })
   })
   win.webContents.on('did-finish-load', () => {
     if (lastUpdate.state !== 'idle') win?.webContents.send(IPC.updateEvent, lastUpdate)
   })
 
-  void win.loadURL(config.webUrl)
+  void win.loadURL(config.startUrl)
 }
 
 function showWindow() {
@@ -181,7 +193,44 @@ function showWindow() {
 const isStr = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max
 
 function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<typeof setupUpdater>) {
-  ipcMain.handle(IPC.info, (): AppInfo => ({ version: app.getVersion(), platform: process.platform, packaged: app.isPackaged, webUrl: config.webUrl }))
+  // The login token is handed out only to our own pages, never to anything else that might load in the window.
+  const fromOurPage = (e: { senderFrame: { url: string } | null }) => !!e.senderFrame && isInternalUrl(e.senderFrame.url, config.startUrl)
+  const tokenFile = userFile('auth-token.bin')
+  let sessionToken: string | null = null // used when the system cannot encrypt (some Linux setups): lasts until the app quits
+
+  ipcMain.handle(IPC.tokenGet, (e) => {
+    if (!fromOurPage(e)) return null
+    if (sessionToken) return sessionToken
+    try {
+      if (!safeStorage.isEncryptionAvailable() || !existsSync(tokenFile)) return null
+      return safeStorage.decryptString(readFileSync(tokenFile))
+    } catch {
+      return null
+    }
+  })
+  ipcMain.handle(IPC.tokenSet, (e, token: unknown) => {
+    if (!fromOurPage(e) || !isStr(token, 4000) || token.length < 8) return
+    sessionToken = token
+    if (safeStorage.isEncryptionAvailable()) {
+      try {
+        mkdirSync(dirname(tokenFile), { recursive: true })
+        writeFileSync(tokenFile, safeStorage.encryptString(token))
+      } catch (err) {
+        log('could not save the login token: ' + (err as Error).message)
+      }
+    }
+  })
+  ipcMain.handle(IPC.tokenClear, (e) => {
+    if (!fromOurPage(e)) return
+    sessionToken = null
+    try {
+      if (existsSync(tokenFile)) unlinkSync(tokenFile)
+    } catch {
+      // nothing to remove
+    }
+  })
+
+  ipcMain.handle(IPC.info, (): AppInfo => ({ mode: config.mode, version: app.getVersion(), platform: process.platform, packaged: app.isPackaged, startUrl: config.startUrl }))
 
   ipcMain.handle(IPC.notify, (_e, p: { title?: unknown; body?: unknown }) => {
     if (!isStr(p?.title, 120) || !isStr(p?.body, 400) || !Notification.isSupported()) return
@@ -221,7 +270,7 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
     quitting = true
     updater.install()
   })
-  ipcMain.on(IPC.retry, () => void win?.loadURL(config.webUrl))
+  ipcMain.on(IPC.retry, () => void win?.loadURL(config.startUrl))
 }
 
 // ---- start ----------------------------------------------------------------------------------------------
@@ -231,6 +280,18 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showWindow)
 
   void app.whenReady().then(() => {
+    // Serve the bundled interface from app://timedesk, with a strict security policy on every file.
+    protocol.handle('app', async (request) => {
+      const url = new URL(request.url)
+      const file = url.host === new URL(APP_ORIGIN).host ? resolveAppFile(join(__dirname, 'app'), url.pathname, existsSync) : null
+      if (!file) return new Response('Not found', { status: 404 })
+      const res = await net.fetch(pathToFileURL(file.file).toString())
+      const headers = new Headers(res.headers)
+      headers.set('Content-Security-Policy', contentSecurityPolicy(config.apiUrl))
+      headers.set('X-Content-Type-Options', 'nosniff')
+      return new Response(res.body, { status: res.status, headers })
+    })
+
     session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'notifications' || permission === 'media'))
 
     const tray = createTray(asset('tray.png'), {
@@ -252,7 +313,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc(tray, updater)
     applyAutoStart()
     createWindow()
-    log(`started ${app.getVersion()} (${app.isPackaged ? 'packaged' : 'development'}) -> ${config.webUrl}`)
+    log(`started ${app.getVersion()} (${app.isPackaged ? 'packaged' : 'development'}) (${config.mode}) -> ${config.startUrl}`)
   })
 
   app.on('before-quit', () => {

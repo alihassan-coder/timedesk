@@ -10,6 +10,7 @@ import { simulateReadableStream } from 'ai'
 
 export const WEB_ORIGIN = 'http://localhost:5173'
 export const ADMIN_EMAIL = 'boss@example.com'
+export const DESKTOP_ORIGIN = 'app://timedesk'
 
 export interface TestApp {
   app: ReturnType<typeof createApp>
@@ -20,7 +21,7 @@ export interface TestApp {
 export async function createTestApp(overrides: { models?: ModelFactory; memory?: MemoryProvider } = {}): Promise<TestApp> {
   const db = await createTestDb()
   const env = { WEB_ORIGIN, KEY_ENCRYPTION_SECRET: 'k'.repeat(40) }
-  const auth = createAuth({ db, secret: 's'.repeat(40), baseURL: 'http://localhost:3001', webOrigin: WEB_ORIGIN, adminEmails: [ADMIN_EMAIL] })
+  const auth = createAuth({ db, secret: 's'.repeat(40), baseURL: 'http://localhost:3001', webOrigin: WEB_ORIGIN, desktopOrigin: DESKTOP_ORIGIN, adminEmails: [ADMIN_EMAIL] })
   return { app: createApp({ db, auth, env, models: overrides.models ?? (() => { throw new Error('no model configured for this test') }), memory: overrides.memory ?? noMemory }), db }
 }
 
