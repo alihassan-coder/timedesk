@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev:memory": "tsx src/dev-memory.ts"
+    "dev:memory": "tsx src/dev-memory.ts",
+    "build": "node scripts/build.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.96",
@@ -32,6 +33,7 @@
     "@electric-sql/pglite": "^0.5.15",
     "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"

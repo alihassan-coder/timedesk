@@ -9,3 +9,6 @@ dist
 release
 *.tgz
 .vercel
+
+# bundled for Vercel by pnpm build
+dist

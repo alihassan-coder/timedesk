@@ -29,6 +29,7 @@ Services throw `AppError` (404, 409, ...); `app.onError` turns it into JSON. Con
 
 ```
 pnpm dev                                  start on http://localhost:3001 (reads .env)
+pnpm build                                bundle for Vercel into dist/server.mjs (api/index.js is the entry)
 pnpm test                                 run the tests (no Neon, no AI keys needed)
 MOCK_AI=1 pnpm dev:memory                 in-memory API with a scripted fake model, for browser tests
 pnpm --filter @timedesk/db db:generate    new migration after a schema change
