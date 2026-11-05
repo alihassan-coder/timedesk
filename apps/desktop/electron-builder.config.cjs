@@ -48,6 +48,8 @@ module.exports = {
   },
 
   linux: {
+    // The package is called @timedesk/desktop, which is not a valid program or package name on Linux, so name them explicitly.
+    executableName: 'timedesk',
     icon: 'build/icon.png',
     category: 'Office',
     maintainer: 'timedesk <alihassan-coder@users.noreply.github.com>',
@@ -57,6 +59,10 @@ module.exports = {
       { target: 'deb', arch: ['x64'] },
     ],
   },
+
+  // File names are fixed here (not derived from the package name) so they match what the updater metadata points to.
+  appImage: { artifactName: 'timedesk-${version}.${ext}' },
+  deb: { packageName: 'timedesk', artifactName: 'timedesk_${version}_${arch}.${ext}' },
 
   publish: { provider: 'github', owner: 'alihassan-coder', repo: 'timedesk' },
 }

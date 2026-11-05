@@ -52,6 +52,16 @@ describe('Windows code signing switches', () => {
     expect(load().nsis.artifactName).toBe('timedesk-Setup-${version}.${ext}')
   })
 
+  it('gives the Linux program and packages valid names even though the npm package is called @timedesk/desktop', () => {
+    const cfg = load()
+    expect(cfg.linux.executableName).toBe('timedesk')
+    expect(cfg.deb.packageName).toBe('timedesk')
+    expect(cfg.deb.artifactName).toBe('timedesk_${version}_${arch}.${ext}')
+    expect(cfg.appImage.artifactName).toBe('timedesk-${version}.${ext}')
+    // none of the names electron-builder will use may contain characters Linux rejects
+    for (const n of [cfg.linux.executableName, cfg.deb.packageName]) expect(n).toMatch(/^[a-z0-9][a-z0-9.+-]*$/)
+  })
+
   it('always unpacks the native app-tracking helper and publishes to the GitHub release', () => {
     const cfg = load()
     expect(cfg.asarUnpack).toContain('node_modules/active-win/**')
