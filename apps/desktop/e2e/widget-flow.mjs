@@ -148,7 +148,10 @@ try {
       const w = small[0]
       const state = execFileSync('xprop', ['-id', w.id, '_NET_WM_STATE', '_NET_WM_WINDOW_TYPE', '_NET_WM_PID']).toString()
       if (!state.includes('_NET_WM_STATE_ABOVE')) throw new Error('not above other windows: ' + state.trim())
-      if (!state.includes('_NET_WM_STATE_SKIP_TASKBAR')) throw new Error('would show in the taskbar: ' + state.trim())
+      // Out of the taskbar either by the skip-taskbar state or by a window type that taskbars do not list.
+      const skips = state.includes('_NET_WM_STATE_SKIP_TASKBAR') || /_NET_WM_WINDOW_TYPE_(TOOLBAR|UTILITY|DOCK|NOTIFICATION|SPLASH)/.test(state)
+      if (!skips) throw new Error('would show in the taskbar: ' + state.replace(/\n/g, ' | ').trim())
+      console.log('linux window state:', state.replace(/\n/g, ' | ').trim())
       if (w.x < 0 || w.y < 0 || w.x + w.w > 1920 || w.y + w.h > 1080) throw new Error('outside the screen: ' + JSON.stringify(w))
     })
   }

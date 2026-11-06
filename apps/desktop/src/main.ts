@@ -227,6 +227,8 @@ function smallWindow(path: string, size: { width: number; height: number }): Bro
     fullscreenable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
+    // On Linux a "toolbar" window is one that taskbars and Alt-Tab lists leave out, which is what a floating timer wants.
+    ...(process.platform === 'linux' ? { type: 'toolbar' as const } : {}),
     title: 'timedesk',
     backgroundColor: '#ffffff',
     icon: nativeImage.createFromPath(asset(process.platform === 'win32' ? 'icon.ico' : 'icon.png')),
