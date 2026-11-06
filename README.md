@@ -2,7 +2,7 @@
 
 Time tracking, todos and an AI assistant for a small team. One web app, a Windows and Linux desktop app, and a Node API on Neon Postgres.
 
-> Status: version 0.3.0. Built for a team of 3 to 5 people. Mobile and offline mode come later (see the [roadmap](#roadmap)).
+> Status: version 0.3.1. Built for a team of 3 to 5 people. Mobile and offline mode come later (see the [roadmap](#roadmap)).
 
 ## What it does
 

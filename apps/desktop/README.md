@@ -78,3 +78,7 @@ The floating timer is a second small window that loads the `/widget` page of the
 | Ask about idle time | Off, or after 5/10/15/30 minutes away |
 
 Linux notes: global shortcuts and always-on-top windows work on X11. Some Wayland desktops do not allow apps to register global shortcuts or keep a window on top; the app logs that and keeps working without them. GNOME hides tray icons unless the AppIndicator extension is installed, which is why the running time is also put in the window title and the floating timer.
+
+### What is tested on Linux
+
+Every change runs the floating-timer test on a real Ubuntu in GitHub Actions (a virtual screen with the Openbox window manager). It checks that the window is shown, above other windows and of a type taskbars skip, that all four styles resize correctly, that stop/resume work between windows, and that the global shortcuts register. That is X11 only. GNOME on Wayland and KDE are not covered, so please report anything odd there.

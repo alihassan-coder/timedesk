@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+
+Fixes for the floating timer. The backend is unchanged, so no backend update is needed.
+
+### Desktop
+- Fixed: on Windows the floating timer could be hidden behind other windows (including timedesk itself), because "always on top" was not being applied. It now stays on top
+- Changing the floating timer's style keeps its bottom-right corner in place, so it no longer jumps up the screen
+- Linux: the floating timer and quick add use the toolbar window type, so taskbars and Alt-Tab lists leave them out
+- The floating timer is now tested on a real Linux (Ubuntu with a window manager) on every change, in addition to Windows
+
 ## 0.3.0
 
 ### Google Calendar (two-way)

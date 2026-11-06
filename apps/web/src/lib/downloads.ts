@@ -4,7 +4,7 @@
  */
 const RELEASES = 'https://github.com/alihassan-coder/timedesk/releases/latest'
 
-export const DESKTOP_VERSION = '0.3.0'
+export const DESKTOP_VERSION = '0.3.1'
 
 export const downloads = [
   { id: 'win', label: 'Windows', file: `timedesk-Setup-${DESKTOP_VERSION}.exe`, note: 'Windows 10 and 11, 64-bit', href: RELEASES },
