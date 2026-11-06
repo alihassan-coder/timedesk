@@ -1,4 +1,4 @@
-# @timedesk/api
+# @timedesk/api readme
 
 Hono API for timedesk. Deploys to Vercel as its own project (Root Directory `apps/api`, entry `src/index.ts`).
 
