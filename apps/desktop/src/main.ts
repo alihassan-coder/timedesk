@@ -260,6 +260,8 @@ function pinOnTop(w: BrowserWindow) {
       if (w.isAlwaysOnTop()) break
     }
     // The "skip taskbar" flag given when the window was created is ignored by some Linux window managers, so it is set again.
+    // Electron remembers the flag as already set and then sends nothing, so on Linux it is switched off and on to make the request real.
+    if (process.platform === 'linux') w.setSkipTaskbar(false)
     w.setSkipTaskbar(true)
     w.moveTop()
     if (!w.isAlwaysOnTop()) log('the window did not accept always-on-top')
