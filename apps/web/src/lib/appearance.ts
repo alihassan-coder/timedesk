@@ -19,7 +19,7 @@ export interface Appearance {
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {
-  mode: 'system',
+  mode: 'light',
   accent: 'blue',
   radius: 0.625,
   font: 'geist',

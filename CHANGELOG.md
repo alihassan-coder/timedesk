@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+### Google Calendar (two-way)
+- Connect your Google account in Settings -> Calendar. See your events on the Calendar page and in the Tasks day, week and month views, and add, edit or delete events from timedesk
+- Tasks with a due date are mirrored to Google as all-day events. Move or rename one in either place and the other follows (drag a task to another day and Google updates; "Sync now" brings in changes made in Google). Finished tasks get a check mark
+- Tempo can list, add, change and delete calendar events
+- Optional: needs a Google client id and secret on the API (see docs/DEPLOY.md). Without them the feature says it is not set up
+- Needs a **database migration** (`pnpm --filter @timedesk/db db:migrate`) and an API redeploy
+- Fixed: editing one field of a task or project (for example moving a task's date or completing it) no longer resets its other fields (priority, project, due date, repeat) to their defaults
+
+### Desktop
+- **Floating timer:** a small always-on-top window with the running time, the task and a Stop button. Four styles you choose in Settings, Desktop: Compact, Expanded, Bottom bar and Pomodoro. Drag it anywhere; it remembers where. Show it automatically (while a timer runs and timedesk is not in front), always, or never
+- The running time is also in the window title, so it shows in the taskbar and Alt-Tab
+- **Shortcuts from any program:** Ctrl+Alt+T starts (resumes the last timer) or stops the timer, Ctrl+Alt+N opens Quick add
+- **Quick add:** type a task in plain words, for example "Call the printer tomorrow !high #website"
+- **Idle check:** after you come back from being away (5 to 30 minutes, your choice), choose to keep the time, remove it, or stop the timer when you left
+- Pomodoro: focus and break periods with a notification at each switch
+- Needs a new desktop release (the floating timer is part of the app)
+
+### API
+- Stopping a timer can name the time it really ended (used by the idle check)
+
+### Web
+- **Command palette:** Ctrl+K jumps to any page, starts a timer on a task, stops the timer, or adds a task from plain words
+- The running time shows in the browser tab title
+- Settings, Timer: daily goal, Pomodoro lengths, and the title switch (saved to your account)
+
+### Web
+- Tasks: new **Day, Week and Month** views next to List and Board, with previous/next/Today navigation and a clear date heading. Tasks without a date wait in a tray you can drag onto a day
+- Drag and drop: move a task to another day (week and month views) or to another column (board) and it is saved straight away
+- Projects: rename, change the description and colour, or delete from the project's menu. Deleting keeps its tasks and tracked time (they become "No project")
+- Model picker in the Tempo chat is wide enough to read long model names, opens upward and scrolls
+- The default colour mode is now light (an existing saved choice is kept)
+- Tempo's answers now render markdown properly: headings, lists, bold, code blocks with a Copy button, tables and links. Raw HTML in an answer is shown as text and never runs
+- Reports: a **Custom** range with start and end dates and quick presets (7, 30, 90 days). The chart groups by day, week or month depending on the length, and a wrong range explains itself
+- Apps and sites: choose Today, 7 days, 30 days or a custom range; search by app or window title; filter by app; page through sessions (10, 25 or 50 rows); delete a single session
+
+### API
+- New: `GET /activity/sessions` (paged, searchable, filterable by app and dates) and `DELETE /activity/:id`. Needs a redeploy
+
+### Tempo AI
+- Can build a time report for any date range ("last week", "1 to 15 October")
+- New tools: rename or re-describe a project, and delete a project
+- Text-to-speech models no longer appear in the Groq chat model list
+
 ## 0.2.0
 
 The desktop app now carries its own copy of the interface.

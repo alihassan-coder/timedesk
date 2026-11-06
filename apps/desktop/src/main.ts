@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { BrowserWindow, Notification, app, ipcMain, nativeImage, net, powerMonitor, protocol, safeStorage, screen, session, shell } from 'electron'
+import { BrowserWindow, Notification, app, dialog, globalShortcut, ipcMain, nativeImage, net, powerMonitor, protocol, safeStorage, screen, session, shell } from 'electron'
 import { pathToFileURL } from 'node:url'
 import { resolveAppFile } from './app-files.ts'
 import { linuxAutostartEntry, linuxAutostartPath } from './autostart.ts'
@@ -10,6 +10,7 @@ import { APP_ORIGIN, contentSecurityPolicy, isInternalUrl, isSafeExternalUrl, re
 import { createTracker, type ActivitySample, type ForegroundWindow } from './tracker.ts'
 import { createTray } from './tray.ts'
 import { setupUpdater } from './updater.ts'
+import { createIdleWatcher, describeAway, insideAnyScreen, sanitizeDesktopSettings, shouldShowWidget, widgetBounds, windowTitle, type Rect } from './widgets.ts'
 import { sanitizeBounds, type Bounds } from './window-state.ts'
 
 // Running from source gets its own ID, so Windows never mixes it up with (or reuses a stale icon from) an installed copy.
@@ -53,7 +54,7 @@ const config = resolveConfig({
   hasBundledUi: existsSync(join(__dirname, 'app', 'index.html')),
 })
 
-let settings: DesktopSettings = { ...DEFAULT_DESKTOP_SETTINGS, ...(readJson<Partial<DesktopSettings>>(userFile('settings.json')) ?? {}) }
+let settings: DesktopSettings = sanitizeDesktopSettings(DEFAULT_DESKTOP_SETTINGS, readJson<Partial<DesktopSettings>>(userFile('settings.json')))
 
 function applyAutoStart() {
   try {
@@ -140,6 +141,16 @@ function createWindow() {
     if (!startHidden) win?.show()
   })
 
+  // The window title carries the running time (set by the ticker below), so the page must not overwrite it.
+  win.on('page-title-updated', (e) => e.preventDefault())
+  // The floating timer shows when the main window is not the one in front.
+  win.on('focus', syncWidget)
+  win.on('blur', syncWidget)
+  win.on('show', syncWidget)
+  win.on('hide', syncWidget)
+  win.on('minimize', syncWidget)
+  win.on('restore', syncWidget)
+
   const saveBounds = () => {
     if (!win || win.isDestroyed() || win.isMinimized()) return
     const maximized = win.isMaximized()
@@ -156,6 +167,12 @@ function createWindow() {
   })
   win.on('closed', () => {
     win = null
+    syncWidget()
+    // Without "keep running in the tray", closing the main window quits the app (the small windows must not keep it alive).
+    if (!settings.closeToTray) {
+      quitting = true
+      app.quit()
+    }
   })
 
   // Only the timedesk site may load here. Other links open in the normal browser.
@@ -187,6 +204,168 @@ function showWindow() {
   if (win?.isMinimized()) win.restore()
   win?.show()
   win?.focus()
+}
+
+// ---- floating timer, quick add, shortcuts, idle time ---------------------------------------------------
+let timer: TimerState = { running: false, label: '', startedAt: null }
+let widgetWin: BrowserWindow | null = null
+let quickWin: BrowserWindow | null = null
+let widgetDismissed = false
+let placedMode: DesktopSettings['widgetMode'] | null = null
+const widgetFile = userFile('widget.json')
+const pageUrl = (path: string) => new URL(path, config.startUrl).toString()
+
+/** A small frameless window that shows a page of the same interface. */
+function smallWindow(path: string, size: { width: number; height: number }): BrowserWindow {
+  const w = new BrowserWindow({
+    ...size,
+    show: false,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    title: 'timedesk',
+    backgroundColor: '#ffffff',
+    icon: nativeImage.createFromPath(asset(process.platform === 'win32' ? 'icon.ico' : 'icon.png')),
+    webPreferences: { preload: asset('preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
+  })
+  try {
+    w.setAlwaysOnTop(true, 'floating')
+    w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  } catch {
+    // not supported on every desktop
+  }
+  // Same rule as the main window: only our own pages load here.
+  w.webContents.on('will-navigate', (e, url) => {
+    if (isInternalUrl(url, config.startUrl)) return
+    e.preventDefault()
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
+  })
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  void w.loadURL(pageUrl(path))
+  return w
+}
+
+function mainIsInFront() {
+  return !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused()
+}
+
+function placeWidget() {
+  if (!widgetWin) return
+  const saved = readJson<{ x: number; y: number }>(widgetFile)
+  const areas: Rect[] = screen.getAllDisplays().map((d) => d.workArea)
+  const pos = saved && insideAnyScreen(saved, areas) ? saved : null
+  const display = pos ? screen.getDisplayNearestPoint(pos) : screen.getPrimaryDisplay()
+  widgetWin.setBounds(widgetBounds(settings.widgetMode, display.workArea, pos))
+  placedMode = settings.widgetMode
+}
+
+let saveWidgetPos: ReturnType<typeof setTimeout> | undefined
+function ensureWidget(): BrowserWindow {
+  if (widgetWin && !widgetWin.isDestroyed()) return widgetWin
+  widgetWin = smallWindow('/widget', { width: 330, height: 56 })
+  widgetWin.on('move', () => {
+    clearTimeout(saveWidgetPos)
+    saveWidgetPos = setTimeout(() => {
+      // Remember where it was dragged. The bottom bar always sits at the bottom, so it does not count.
+      if (!widgetWin || widgetWin.isDestroyed() || settings.widgetMode === 'dock') return
+      const [x, y] = widgetWin.getPosition()
+      writeJson(widgetFile, { x, y })
+    }, 400)
+  })
+  widgetWin.on('closed', () => {
+    widgetWin = null
+    placedMode = null
+  })
+  placedMode = null
+  return widgetWin
+}
+
+/** Shows or hides the floating timer according to the setting, the timer and which window is in front. */
+function syncWidget() {
+  const show = shouldShowWidget({ visibility: settings.widget, signedIn, running: timer.running, mainFocused: mainIsInFront(), dismissed: widgetDismissed })
+  if (show) {
+    const w = ensureWidget()
+    if (placedMode !== settings.widgetMode || !w.isVisible()) placeWidget()
+    if (!w.isVisible()) w.showInactive() // never steal the keyboard from what the person is doing
+  } else if (widgetWin && !widgetWin.isDestroyed() && widgetWin.isVisible()) {
+    widgetWin.hide()
+  }
+}
+
+const QUICK_SIZE = { width: 560, height: 92 }
+function showQuickAdd() {
+  if (!signedIn) {
+    showWindow() // nobody to add a task for: ask them to sign in
+    return
+  }
+  if (!quickWin || quickWin.isDestroyed()) {
+    quickWin = smallWindow('/quick-add', QUICK_SIZE)
+    quickWin.on('blur', () => quickWin?.hide()) // clicking elsewhere dismisses it
+    quickWin.on('closed', () => {
+      quickWin = null
+    })
+  }
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+  quickWin.setBounds({ x: Math.round(area.x + (area.width - QUICK_SIZE.width) / 2), y: Math.round(area.y + area.height * 0.28), ...QUICK_SIZE })
+  quickWin.show()
+  quickWin.focus()
+  const w = quickWin
+  const announce = () => w.webContents.send(IPC.quickAddShown)
+  if (w.webContents.isLoading()) w.webContents.once('did-finish-load', announce)
+  else announce()
+}
+
+/** System-wide keys. Linux desktops that block global shortcuts (some Wayland setups) simply do not get them. */
+function applyShortcuts() {
+  globalShortcut.unregisterAll()
+  if (!settings.shortcuts) return
+  const reg = (accelerator: string, run: () => void) => {
+    try {
+      if (!globalShortcut.register(accelerator, run)) log(`shortcut ${accelerator} is taken or not allowed here`)
+    } catch (e) {
+      log(`shortcut ${accelerator}: ${(e as Error).message}`)
+    }
+  }
+  reg('CommandOrControl+Alt+T', () => win?.webContents.send(IPC.trayAction, 'toggle-timer'))
+  reg('CommandOrControl+Alt+N', showQuickAdd)
+}
+
+const idle = createIdleWatcher()
+async function askAboutIdle(since: number) {
+  const away = Date.now() - since
+  const at = new Date(since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    title: 'timedesk',
+    message: `You were away for ${describeAway(away)}`,
+    detail: `The timer kept running on "${timer.label || 'Stopwatch'}" since ${at}. What should happen to those minutes?`,
+    buttons: ['Keep the time', `Remove ${describeAway(away)} and keep going`, `Stop the timer at ${at}`],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  })
+  if (response === 1) win?.webContents.send(IPC.idleDecision, { action: 'remove', at: since })
+  if (response === 2) win?.webContents.send(IPC.idleDecision, { action: 'stop', at: since })
+}
+
+function startTimers() {
+  // The window title carries the running time, so it shows in the taskbar and Alt-Tab.
+  setInterval(() => {
+    if (!win || win.isDestroyed()) return
+    const title = windowTitle(timer, Date.now())
+    if (win.getTitle() !== title) win.setTitle(title)
+  }, 1000)
+  setInterval(() => {
+    const back = idle.check(powerMonitor.getSystemIdleTime(), Date.now(), timer.running, settings.idleMinutes)
+    if (back) void askAboutIdle(back.idleSince)
+  }, 10_000)
 }
 
 // ---- messages from the web app -------------------------------------------------------------------------
@@ -241,23 +420,61 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
 
   ipcMain.on(IPC.timer, (_e, s: Partial<TimerState>) => {
     if (typeof s?.running !== 'boolean') return
-    tray.update({ running: s.running, label: isStr(s.label, 200) ? s.label : '', startedAt: typeof s.startedAt === 'number' ? s.startedAt : null })
+    const wasRunning = timer.running
+    timer = {
+      running: s.running,
+      label: isStr(s.label, 200) ? s.label : '',
+      startedAt: typeof s.startedAt === 'number' ? s.startedAt : null,
+      showInTitle: s.showInTitle !== false,
+    }
+    if (timer.running && !wasRunning) widgetDismissed = false // a new timer brings the floating timer back
+    tray.update(timer)
+    syncWidget()
   })
 
   ipcMain.handle(IPC.getSettings, () => settings)
-  ipcMain.handle(IPC.setSettings, (_e, patch: Partial<DesktopSettings>) => {
-    const next = { ...settings }
-    for (const k of Object.keys(DEFAULT_DESKTOP_SETTINGS) as (keyof DesktopSettings)[]) if (typeof patch?.[k] === 'boolean') next[k] = patch[k]
-    settings = next
+  ipcMain.handle(IPC.setSettings, (_e, patch: unknown) => {
+    const before = settings
+    settings = sanitizeDesktopSettings(settings, patch)
     writeJson(userFile('settings.json'), settings)
     applyAutoStart()
     syncTracking()
+    if (settings.widgetMode !== before.widgetMode) placedMode = null // resize and move the floating timer for the new style
+    if (settings.widget !== before.widget) widgetDismissed = false
+    if (settings.shortcuts !== before.shortcuts) applyShortcuts()
+    syncWidget()
+    widgetWin?.webContents.send(IPC.dataChangedEvent) // the floating timer re-reads its style at once
     return settings
   })
 
   ipcMain.on(IPC.signedIn, (_e, v: unknown) => {
     signedIn = v === true
     syncTracking()
+    if (!signedIn) {
+      idle.reset()
+      quickWin?.hide()
+    }
+    syncWidget()
+  })
+
+  // The floating timer and quick add are windows of this app: they can hide themselves, open the main window, and
+  // tell the other windows to reload.
+  ipcMain.on(IPC.widgetHide, (e) => {
+    if (!fromOurPage(e)) return
+    widgetDismissed = true
+    syncWidget()
+  })
+  ipcMain.on(IPC.openMain, (e) => {
+    if (fromOurPage(e)) showWindow()
+  })
+  ipcMain.on(IPC.closeOwn, (e) => {
+    if (!fromOurPage(e)) return
+    const from = BrowserWindow.fromWebContents(e.sender)
+    if (from && (from === quickWin || from === widgetWin)) from.hide()
+  })
+  ipcMain.on(IPC.dataChanged, (e) => {
+    if (!fromOurPage(e)) return
+    for (const w of [win, widgetWin, quickWin]) if (w && !w.isDestroyed() && w.webContents !== e.sender) w.webContents.send(IPC.dataChangedEvent)
   })
   ipcMain.handle(IPC.pull, () => tracker.drain())
   ipcMain.on(IPC.requeue, (_e, samples: ActivitySample[]) => {
@@ -313,12 +530,15 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc(tray, updater)
     applyAutoStart()
     createWindow()
+    applyShortcuts()
+    startTimers()
     log(`started ${app.getVersion()} (${app.isPackaged ? 'packaged' : 'development'}) (${config.mode}) -> ${config.startUrl}`)
   })
 
   app.on('before-quit', () => {
     quitting = true
   })
+  app.on('will-quit', () => globalShortcut.unregisterAll())
   app.on('window-all-closed', () => {
     // Stay alive in the tray unless the person chose to quit.
     if (quitting || !settings.closeToTray) app.quit()

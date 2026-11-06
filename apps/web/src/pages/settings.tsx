@@ -1,10 +1,12 @@
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { Row } from '@/components/setting-row'
 import { useProfile } from '@/lib/auth-client'
 import { isDesktop } from '@/lib/desktop'
 import { AiTab } from '@/pages/settings-ai'
+import { CalendarTab } from '@/pages/settings-calendar'
 import { DesktopTab } from '@/pages/settings-desktop'
 import { NotificationsTab } from '@/pages/settings-notifications'
+import { TimerTab } from '@/pages/settings-timer'
 import { Check, Monitor, Moon, RotateCcw, Sun } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { Segmented } from '@/components/segmented'
@@ -47,7 +49,9 @@ export default function SettingsPage() {
         <TabsList>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
           <TabsTrigger value="ai">AI assistant</TabsTrigger>
+          <TabsTrigger value="timer">Timer</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
+          <TabsTrigger value="calendar">Calendar</TabsTrigger>
           {isDesktop() && <TabsTrigger value="desktop">Desktop</TabsTrigger>}
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="account">Account</TabsTrigger>
@@ -58,8 +62,14 @@ export default function SettingsPage() {
         <TabsContent value="ai" className="pt-4">
           <AiTab />
         </TabsContent>
+        <TabsContent value="timer" className="pt-4">
+          <TimerTab />
+        </TabsContent>
         <TabsContent value="notifications" className="pt-4">
           <NotificationsTab />
+        </TabsContent>
+        <TabsContent value="calendar" className="pt-4">
+          <CalendarTab />
         </TabsContent>
         {isDesktop() && (
           <TabsContent value="desktop" className="pt-4">
@@ -218,7 +228,7 @@ function AppearanceTab() {
 
 function IntegrationsTab() {
   const items = [
-    { name: 'Google Calendar', text: 'Show events and count meeting time.', state: 'Available in phase 5' },
+    { name: 'Google Calendar', text: 'See your events, add events, and keep tasks in step both ways.', state: 'calendar' },
     { name: 'Outlook Calendar', text: 'The same, for Microsoft accounts.', state: 'Later' },
     { name: 'Chrome extension', text: 'Track websites and get reminders in the browser.', state: 'Available in phase 5' },
   ]
@@ -227,7 +237,13 @@ function IntegrationsTab() {
       <CardContent className="divide-y">
         {items.map((i) => (
           <Row key={i.name} title={i.name} description={i.text}>
-            <Badge variant="outline">{i.state}</Badge>
+            {i.state === 'calendar' ? (
+              <Button size="sm" variant="outline" render={<Link to="/settings?tab=calendar" />}>
+                Set up
+              </Button>
+            ) : (
+              <Badge variant="outline">{i.state}</Badge>
+            )}
           </Row>
         ))}
       </CardContent>

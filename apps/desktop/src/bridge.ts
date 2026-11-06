@@ -2,11 +2,13 @@ export type {
   ActivitySample,
   AppInfo,
   DesktopSettings,
+  IdleDecision,
   TimedeskBridge,
   TimerState,
   TokenStore,
   TrayAction,
   UpdateStatus,
+  WidgetMode,
 } from '@timedesk/shared'
 export { DEFAULT_DESKTOP_SETTINGS } from '@timedesk/shared'
 
@@ -29,4 +31,11 @@ export const IPC = {
   tokenSet: 'timedesk:token:set',
   tokenClear: 'timedesk:token:clear',
   retry: 'timedesk:retry',
+  widgetHide: 'timedesk:widget:hide',
+  openMain: 'timedesk:window:open-main',
+  closeOwn: 'timedesk:window:close-own',
+  dataChanged: 'timedesk:data:changed',
+  dataChangedEvent: 'timedesk:data:changed:event',
+  idleDecision: 'timedesk:idle:decision',
+  quickAddShown: 'timedesk:quick-add:shown',
 } as const

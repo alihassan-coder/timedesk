@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type DesktopSettings, type TimedeskBridge, type TimerState, type TrayAction, type UpdateStatus } from './bridge.ts'
+import { IPC, type DesktopSettings, type IdleDecision, type TimedeskBridge, type TimerState, type TrayAction, type UpdateStatus } from './bridge.ts'
 import type { ActivitySample } from './tracker.ts'
 
 /** The only thing the web page can reach. Everything goes through named, validated messages. */
@@ -25,6 +25,25 @@ const bridge: TimedeskBridge = {
     const handler = (_: unknown, status: UpdateStatus) => cb(status)
     ipcRenderer.on(IPC.updateEvent, handler)
     return () => ipcRenderer.removeListener(IPC.updateEvent, handler)
+  },
+  hideWidget: () => ipcRenderer.send(IPC.widgetHide),
+  openMainWindow: () => ipcRenderer.send(IPC.openMain),
+  closeOwnWindow: () => ipcRenderer.send(IPC.closeOwn),
+  dataChanged: () => ipcRenderer.send(IPC.dataChanged),
+  onDataChanged(cb: () => void) {
+    const handler = () => cb()
+    ipcRenderer.on(IPC.dataChangedEvent, handler)
+    return () => ipcRenderer.removeListener(IPC.dataChangedEvent, handler)
+  },
+  onIdleDecision(cb: (d: IdleDecision) => void) {
+    const handler = (_: unknown, d: IdleDecision) => cb(d)
+    ipcRenderer.on(IPC.idleDecision, handler)
+    return () => ipcRenderer.removeListener(IPC.idleDecision, handler)
+  },
+  onQuickAddShown(cb: () => void) {
+    const handler = () => cb()
+    ipcRenderer.on(IPC.quickAddShown, handler)
+    return () => ipcRenderer.removeListener(IPC.quickAddShown, handler)
   },
   onTrayAction(cb: (action: TrayAction) => void) {
     const handler = (_: unknown, action: TrayAction) => cb(action)

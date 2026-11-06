@@ -32,7 +32,7 @@ export function TimerWidget() {
         <ProjectDot project={project} />
         <span className="hidden max-w-40 truncate text-sm md:inline">{task?.title ?? project?.name ?? 'Stopwatch'}</span>
         <span className="text-sm font-medium">{formatDuration(entryDuration(running, now))}</span>
-        <Button size="icon-sm" variant="destructive" aria-label="Stop timer" onClick={actions.stopTimer}>
+        <Button size="icon-sm" variant="destructive" aria-label="Stop timer" onClick={() => actions.stopTimer()}>
           <Square />
         </Button>
       </div>

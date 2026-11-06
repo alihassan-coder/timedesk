@@ -103,6 +103,7 @@ try {
     await ev(`document.querySelector('[aria-label="Send message"]').click()`)
     await waitFor(bodyHas('Created a task'), 'tool chip', 15000)
     await waitFor(bodyHas('Done. I added that to your tasks.'), 'final answer', 15000)
+    await sleep(1500) // let the chat finish saving before this page is left
     await shot('22-chat-tool')
   })
 

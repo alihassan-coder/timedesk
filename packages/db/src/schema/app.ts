@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
 import { user } from './auth.ts'
 
 /**
@@ -145,4 +145,49 @@ export const activitySamples = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('activity_user_started_idx').on(t.userId, t.startedAt)],
+)
+
+/**
+ * A person's Google Calendar connection. The tokens are encrypted by the API (AES-256-GCM) before they
+ * are stored and are never sent to the browser. One row per user.
+ */
+export const googleConnections = pgTable('google_connections', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  /** The Google account that was connected, shown in Settings. */
+  email: text('email'),
+  /** The calendar used for events and for mirrored tasks. "primary" is the person's main calendar. */
+  calendarId: text('calendar_id').notNull().default('primary'),
+  encryptedRefreshToken: text('encrypted_refresh_token').notNull(),
+  /** Short-lived access token kept so every request does not need a refresh. Encrypted as well. */
+  encryptedAccessToken: text('encrypted_access_token'),
+  accessExpiresAt: timestamp('access_expires_at', { withTimezone: true }),
+  /** Mirror tasks that have a due date to Google Calendar as all-day events. */
+  pushTasks: boolean('push_tasks').notNull().default(true),
+  /** Reserved for incremental sync. */
+  syncToken: text('sync_token'),
+  lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** Which Google event mirrors which task, so a change on either side can find the other. */
+export const googleTaskLinks = pgTable(
+  'google_task_links',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    googleEventId: text('google_event_id').notNull(),
+    /** The event's etag after our own last write, so the next pull can tell our write from a change made in Google. */
+    etag: text('etag'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('google_task_links_task').on(t.taskId), uniqueIndex('google_task_links_event').on(t.userId, t.googleEventId)],
 )

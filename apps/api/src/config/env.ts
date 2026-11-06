@@ -23,9 +23,18 @@ const schema = z.object({
   /** Origin of the bundled desktop app. It uses token login, so this rarely needs changing. */
   DESKTOP_ORIGIN: z.string().default('app://timedesk'),
   KEY_ENCRYPTION_SECRET: z.string().min(32, 'KEY_ENCRYPTION_SECRET must be at least 32 characters'),
+  /** Google Calendar. All optional: without the client id and secret the feature is switched off. */
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  /** Defaults to <BETTER_AUTH_URL>/v1/integrations/google/callback. Must match the address in the Google Cloud console. */
+  GOOGLE_REDIRECT_URI: z.string().url().optional(),
 })
 
 export type Env = z.infer<typeof schema>
+
+/** The Google redirect address: the configured one, or the API's own callback route. */
+export const googleRedirectUri = (env: Pick<Env, 'BETTER_AUTH_URL' | 'GOOGLE_REDIRECT_URI'>) =>
+  env.GOOGLE_REDIRECT_URI ?? `${env.BETTER_AUTH_URL.replace(/\/$/, '')}/v1/integrations/google/callback`
 
 /** Validates process.env once at startup so a missing secret fails loudly, not at the first request. */
 export function loadEnv(source: Record<string, string | undefined> = process.env): Env {

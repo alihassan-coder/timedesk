@@ -12,12 +12,14 @@ import CalendarPage from '@/pages/calendar'
 import Dashboard from '@/pages/dashboard'
 import DownloadPage from '@/pages/download'
 import NotFoundPage from '@/pages/not-found'
+import QuickAddPage from '@/pages/quick-add'
 import ProjectsPage from '@/pages/projects'
 import ReportsPage from '@/pages/reports'
 import ReviewPage from '@/pages/review'
 import SettingsPage from '@/pages/settings'
 import TasksPage from '@/pages/tasks'
 import TimesheetPage from '@/pages/timesheet'
+import WidgetPage from '@/pages/widget'
 
 export default function App() {
   return (
@@ -29,6 +31,9 @@ export default function App() {
             <Route path="register" element={<RegisterPage />} />
           </Route>
           <Route element={<RequireAuth />}>
+            {/* Small windows of the desktop app: the floating timer and quick add. No sidebar. */}
+            <Route path="widget" element={<WidgetPage />} />
+            <Route path="quick-add" element={<QuickAddPage />} />
             <Route element={<Layout />}>
               <Route index element={<Dashboard />} />
               <Route path="tasks" element={<TasksPage />} />

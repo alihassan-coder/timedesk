@@ -1,7 +1,8 @@
 import { createDb } from '@timedesk/db'
 import { createApp } from './app.ts'
-import { loadEnv } from './config/env.ts'
+import { googleRedirectUri, loadEnv } from './config/env.ts'
 import { createAuth } from './lib/auth.ts'
+import { createGoogleClient } from './lib/google.ts'
 import { createMem0Memory } from './lib/memory.ts'
 import { realModelFactory } from './lib/models.ts'
 
@@ -18,4 +19,10 @@ const auth = createAuth({
   crossSiteCookies: env.CROSS_SITE_COOKIES,
 })
 
-export default createApp({ db, auth, env, models: realModelFactory, memory: createMem0Memory(env.DATABASE_URL) })
+// Google Calendar is optional: without a client id and secret the feature reports "not set up".
+const google =
+  env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+    ? { client: createGoogleClient({ clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }), redirectUri: googleRedirectUri(env) }
+    : undefined
+
+export default createApp({ db, auth, env, models: realModelFactory, memory: createMem0Memory(env.DATABASE_URL), google })

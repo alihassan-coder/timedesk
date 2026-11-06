@@ -28,9 +28,14 @@ export function createApp(deps: Deps) {
   app.on(['GET', 'POST'], '/api/auth/*', (c) => deps.auth.handler(c.req.raw))
 
   // Everything under /v1 needs an approved account.
+  const controllers = createControllers(createServices(deps))
+
+  // Google sends the browser back here after the person agrees. No session on this request: the signed state proves who started it.
+  app.get('/v1/integrations/google/callback', controllers.google.callback)
+
   const v1 = new Hono<AppEnv>()
   v1.use('*', requireUser(deps))
-  v1.route('/', createRoutes(createControllers(createServices(deps))))
+  v1.route('/', createRoutes(controllers))
   app.route('/v1', v1)
 
   app.onError((err, c) => {

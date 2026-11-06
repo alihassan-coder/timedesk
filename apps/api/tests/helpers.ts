@@ -4,6 +4,7 @@ import { createTestDb } from '@timedesk/db/testing'
 import { createApp } from '../src/app.ts'
 import { createAuth } from '../src/lib/auth.ts'
 import { noMemory, type MemoryProvider } from '../src/lib/memory.ts'
+import type { GoogleConfig } from '../src/lib/google.ts'
 import type { ModelFactory } from '../src/lib/models.ts'
 import { MockLanguageModelV4 } from 'ai/test'
 import { simulateReadableStream } from 'ai'
@@ -18,11 +19,11 @@ export interface TestApp {
 }
 
 /** The real app on a fresh in-memory Postgres with every migration applied. */
-export async function createTestApp(overrides: { models?: ModelFactory; memory?: MemoryProvider } = {}): Promise<TestApp> {
+export async function createTestApp(overrides: { models?: ModelFactory; memory?: MemoryProvider; google?: GoogleConfig } = {}): Promise<TestApp> {
   const db = await createTestDb()
   const env = { WEB_ORIGIN, KEY_ENCRYPTION_SECRET: 'k'.repeat(40) }
   const auth = createAuth({ db, secret: 's'.repeat(40), baseURL: 'http://localhost:3001', webOrigin: WEB_ORIGIN, desktopOrigin: DESKTOP_ORIGIN, adminEmails: [ADMIN_EMAIL] })
-  return { app: createApp({ db, auth, env, models: overrides.models ?? (() => { throw new Error('no model configured for this test') }), memory: overrides.memory ?? noMemory }), db }
+  return { app: createApp({ db, auth, env, models: overrides.models ?? (() => { throw new Error('no model configured for this test') }), memory: overrides.memory ?? noMemory, google: overrides.google }), db }
 }
 
 const json = (body: unknown, cookie?: string): RequestInit => ({

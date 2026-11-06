@@ -53,4 +53,16 @@ describe('time tracking', () => {
     const res = await (await me.get(`/time-entries?from=${encodeURIComponent(future)}`)).json()
     expect(res.entries).toEqual([])
   })
+
+  it('can stop at the moment the person went idle, but not before it started or in the future', async () => {
+    const started = (await (await me.post('/time-entries/start', {})).json()).entry
+    const early = new Date(new Date(started.startedAt).getTime() - 60_000).toISOString()
+    const late = new Date(Date.now() + 3_600_000).toISOString()
+    expect((await me.post('/time-entries/stop', { endedAt: early })).status).toBe(422)
+    expect((await me.post('/time-entries/stop', { endedAt: late })).status).toBe(422)
+    const mid = new Date(new Date(started.startedAt).getTime() + 1000).toISOString()
+    const stopped = (await (await me.post('/time-entries/stop', { endedAt: mid })).json()).entry
+    expect(new Date(stopped.endedAt).toISOString()).toBe(mid)
+    expect((await me.post('/time-entries/stop')).status).toBe(409)
+  })
 })

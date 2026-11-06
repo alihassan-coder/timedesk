@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
-import { formatHours, overlapMs, periodStart, type ReportPeriod, type TimeEntry } from '@timedesk/shared'
+import { addDays, daysInRange, formatHours, overlapMs, periodStart, rangeBuckets, toDateKey, type ReportPeriod, type TimeEntry } from '@timedesk/shared'
 import { PageHeader } from '@/components/page-header'
 import { Segmented } from '@/components/segmented'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   ChartContainer,
@@ -66,12 +69,41 @@ function buckets(period: ReportPeriod, now: number): Bucket[] {
 const sum = (entries: TimeEntry[], b: { start: number; end: number }, now: number) =>
   entries.reduce((s, e) => s + overlapMs(e, b.start, b.end, now), 0)
 
+type Mode = ReportPeriod | 'custom'
+const MAX_DAYS = 1830 // about five years
+const PRESETS = [
+  { label: 'Last 7 days', days: 7 },
+  { label: 'Last 30 days', days: 30 },
+  { label: 'Last 90 days', days: 90 },
+]
+
+const shortDate = (key: string) => {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 export default function ReportsPage() {
   const { projects, entries } = useStore()
   const now = useNow(false)
-  const [period, setPeriod] = useState<ReportPeriod>('month')
+  const today = toDateKey(now)
+  const [period, setPeriod] = useState<Mode>('month')
+  const [from, setFrom] = useState(() => addDays(toDateKey(Date.now()), -13))
+  const [to, setTo] = useState(() => toDateKey(Date.now()))
 
-  const bs = buckets(period, now)
+  const custom = period === 'custom'
+  const rangeDays = custom && from && to ? daysInRange(from, to) : 0
+  const rangeError = !custom
+    ? ''
+    : !from || !to
+      ? 'Pick a start and an end date.'
+      : rangeDays <= 0
+        ? 'The end date must not be before the start date.'
+        : rangeDays > MAX_DAYS
+          ? 'Pick a range of five years or less.'
+          : ''
+  const customSet = custom && !rangeError ? rangeBuckets(from, to) : null
+
+  const bs = custom ? (customSet?.buckets ?? []) : buckets(period, now)
   const data = bs.map((b) => {
     const row: Record<string, number | string> = { label: b.label }
     for (const p of projects) {
@@ -81,7 +113,7 @@ export default function ReportsPage() {
   })
   const config = Object.fromEntries(projects.map((p) => [p.id, { label: p.name, color: projectColor(p) }])) satisfies ChartConfig
 
-  const range = { start: bs[0].start, end: bs[bs.length - 1].end }
+  const range = bs.length ? { start: bs[0].start, end: bs[bs.length - 1].end } : { start: 0, end: 0 }
   const totals = projects
     .map((p) => ({ project: p, ms: sum(entries.filter((e) => e.projectId === p.id), range, now) }))
     .sort((a, b) => b.ms - a.ms)
@@ -101,21 +133,57 @@ export default function ReportsPage() {
               { value: 'month', label: 'Month' },
               { value: 'quarter', label: 'Quarter' },
               { value: 'year', label: 'Year' },
+              { value: 'custom', label: 'Custom' },
             ]}
           />
         }
       />
 
+      {custom && (
+        <div className="bg-muted/30 flex flex-wrap items-end gap-3 rounded-xl border p-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="r-from">From</Label>
+            <Input id="r-from" type="date" className="w-40" max={to || undefined} value={from} onChange={(e) => setFrom(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="r-to">To</Label>
+            <Input id="r-to" type="date" className="w-40" min={from || undefined} value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {PRESETS.map((p) => (
+              <Button
+                key={p.days}
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setFrom(addDays(today, -(p.days - 1)))
+                  setTo(today)
+                }}
+              >
+                {p.label}
+              </Button>
+            ))}
+          </div>
+          {rangeError && (
+            <p role="alert" className="text-destructive w-full text-sm">
+              {rangeError}
+            </p>
+          )}
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>{formatHours(grand)} tracked</CardTitle>
-          <CardDescription>Hours by project, this {period}</CardDescription>
+          <CardDescription>
+            {custom ? (customSet ? `Hours by project, ${shortDate(from)} to ${shortDate(to)} (${rangeDays} day${rangeDays === 1 ? '' : 's'}, by ${customSet.unit})` : 'Choose a valid date range') : `Hours by project, this ${period}`}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <ChartContainer config={config} className="h-72 w-full">
             <BarChart data={data} margin={{ left: 0, right: 4 }}>
               <CartesianGrid vertical={false} />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval={period === 'month' ? 2 : 0} />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval={custom ? Math.max(0, Math.ceil(bs.length / 12) - 1) : period === 'month' ? 2 : 0} />
               <YAxis tickLine={false} axisLine={false} width={28} />
               <ChartTooltip content={<ChartTooltipContent />} />
               <ChartLegend content={<ChartLegendContent />} />
@@ -150,6 +218,8 @@ export default function ReportsPage() {
             ))}
           </TableBody>
         </Table>
+        {projects.length === 0 && <p className="text-muted-foreground p-6 text-center text-sm">No projects yet. Time you track appears here by project.</p>}
+        {projects.length > 0 && grand === 0 && !rangeError && <p className="text-muted-foreground p-4 text-center text-sm">No time was tracked in this period.</p>}
       </div>
     </>
   )

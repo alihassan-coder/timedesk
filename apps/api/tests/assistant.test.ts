@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
+import { formatHours } from '@timedesk/shared'
 import { schema } from '@timedesk/db'
 import { fakeMemory } from './fakes.ts'
 import { api, approvedMember, createTestApp, scriptedModel, textStep, toolStep } from './helpers.ts'
@@ -91,6 +92,53 @@ describe('assistant tools', () => {
 
     const rows = await t.db.select().from(schema.tasks)
     expect(rows.map((r) => [r.status, r.due]).sort()).toEqual([['done', '2026-11-05'], ['todo', '2026-11-06']])
+  }, 30_000)
+
+  it('renames a project when asked', async () => {
+    const { t, ann } = await setup({ steps: [toolStep('update_project', { project: 'web', name: 'Website', description: 'Marketing site' }), textStep('Renamed.')] })
+    await ann.put('/ai/keys/openai', { key: SECRET })
+    await ann.post('/projects', { name: 'Web stuff' })
+    await (await ann.post('/assistant/chat', chat())).text()
+    const rows = await t.db.select().from(schema.projects)
+    expect(rows[0]).toMatchObject({ name: 'Website', description: 'Marketing site' })
+  }, 30_000)
+
+  it('deletes a project but keeps its tasks and time', async () => {
+    const { t, ann } = await setup({ steps: [toolStep('delete_project', { project: 'Website' }), textStep('Deleted.')] })
+    await ann.put('/ai/keys/openai', { key: SECRET })
+    const project = (await (await ann.post('/projects', { name: 'Website' })).json()).project
+    await ann.post('/tasks', { title: 'Fix header', projectId: project.id })
+    await ann.post('/time-entries/start', { projectId: project.id })
+    await (await ann.post('/assistant/chat', chat())).text()
+
+    expect((await (await ann.get('/projects')).json()).projects).toHaveLength(0)
+    const tasks = await t.db.select().from(schema.tasks)
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].projectId).toBeNull()
+    expect((await t.db.select().from(schema.timeEntries))[0].projectId).toBeNull()
+  }, 30_000)
+
+  it('builds a time report for a custom date range', async () => {
+    const { t, ann } = await setup({ steps: [toolStep('time_report', { from: '2026-10-01', to: '2026-10-15' }), textStep('Here is the report.')] })
+    await ann.put('/ai/keys/openai', { key: SECRET })
+    const project = (await (await ann.post('/projects', { name: 'Website' })).json()).project
+    const [me] = await t.db.select().from(schema.user)
+    const add = (start: Date, hours: number) =>
+      t.db.insert(schema.timeEntries).values({ id: crypto.randomUUID(), workspaceId: me.id, userId: me.id, projectId: project.id, startedAt: start, endedAt: new Date(start.getTime() + hours * 3_600_000) })
+    await add(new Date(2026, 9, 5, 9), 2) // inside the range
+    await add(new Date(2026, 9, 20, 9), 5) // outside the range
+    const body = await (await ann.post('/assistant/chat', chat())).text()
+    expect(body).toContain('Here is the report.')
+    expect(body).toContain('custom')
+    expect(body).toContain(formatHours(2 * 3_600_000))
+    expect(body).not.toContain(formatHours(7 * 3_600_000))
+  }, 30_000)
+
+  it('rejects a backwards custom range instead of guessing', async () => {
+    const { ann } = await setup({ steps: [toolStep('time_report', { from: '2026-10-15', to: '2026-10-01' }), textStep('ok')] })
+    await ann.put('/ai/keys/openai', { key: SECRET })
+    const body = await (await ann.post('/assistant/chat', chat())).text()
+    expect(body).toContain('must not be before')
   }, 30_000)
 
   it('starts and stops the timer', async () => {

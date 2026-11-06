@@ -57,7 +57,45 @@ Tempo's memory (mem0) needs the `vector` extension. If memory errors, run in the
 2. Settings -> AI assistant: add at least one provider key. Add an OpenAI or Gemini key to switch on memory.
 3. Share the address with your team. They register, then you approve them under Team members.
 
-## 6. Desktop installers (GitHub Releases)
+## 6. Google Calendar (optional)
+
+Without this section everything else works; the Calendar page and Settings -> Calendar simply say Google Calendar is not set up. With it, each person can connect their own Google account: their events show in timedesk, they can add and edit events here, and tasks with a due date are mirrored to Google as all-day events (changes go both ways).
+
+**What you need from Google** (free, about 10 minutes, one time):
+
+1. Go to the [Google Cloud console](https://console.cloud.google.com/) and create a project (any name, for example "timedesk").
+2. **APIs & Services -> Library**: search for **Google Calendar API** and press **Enable**.
+3. **APIs & Services -> OAuth consent screen** (Google may call it "Google Auth platform"):
+   - User type: **External**. App name: timedesk. Support and developer email: yours.
+   - Scopes: add `.../auth/calendar.events` and `.../auth/userinfo.email`.
+   - Publishing status: leave it on **Testing**. This is fine for a small team and needs no Google review.
+   - **Test users**: add the Google email of every person who will connect (up to 100). Only they can connect while it is in Testing.
+4. **APIs & Services -> Credentials -> Create credentials -> OAuth client ID**:
+   - Application type: **Web application**.
+   - **Authorized redirect URIs**: add `<your API address>/v1/integrations/google/callback`, for example `https://api.example.com/v1/integrations/google/callback`. It must match exactly, including https and no trailing slash. For local development also add `http://localhost:3001/v1/integrations/google/callback`.
+   - Create it and copy the **Client ID** and **Client secret**.
+5. In the **API's** Vercel project -> Settings -> Environment Variables add (Production, then redeploy):
+
+| Variable | Value |
+|---|---|
+| `GOOGLE_CLIENT_ID` | The client id from step 4 |
+| `GOOGLE_CLIENT_SECRET` | The client secret from step 4 |
+| `GOOGLE_REDIRECT_URI` | Optional. Only if your API address differs from `BETTER_AUTH_URL`. Defaults to `<BETTER_AUTH_URL>/v1/integrations/google/callback` |
+
+6. **Apply the database migration** (it adds the tables for the connection and the task links). From your computer, with the database's `DATABASE_URL` in `apps/api/.env`:
+
+```
+pnpm --filter @timedesk/db db:migrate
+```
+
+7. Open timedesk -> Settings -> **Calendar** -> **Connect Google Calendar**. Google shows an "unverified app" warning while the app is in Testing: choose Advanced -> Go to timedesk. In the desktop app the sign-in opens in your normal browser and the app notices when you are done.
+
+Notes:
+- Tokens: the refresh token is encrypted in the database with `KEY_ENCRYPTION_SECRET` (the same secret as the AI keys). Do not change that secret, or everyone has to connect again.
+- In Testing mode Google expires the permission after **7 days**, so people may be asked to connect again weekly. Publishing the app (verification) removes that; for a team of a few people reconnecting is usually acceptable.
+- Disconnecting in timedesk revokes the permission at Google and deletes the stored tokens. You can also remove timedesk at https://myaccount.google.com/permissions.
+
+## 7. Desktop installers (GitHub Releases)
 
 The workflow `.github/workflows/desktop-release.yml` builds the Windows installer, the Linux AppImage and the `.deb`, and publishes them as a GitHub Release. Installed apps check that release and update themselves. This needs a **public** repository (or a separate public releases repository); a private one cannot serve anonymous downloads or updates.
 
@@ -90,3 +128,4 @@ A Windows build on your own machine: `TIMEDESK_API_URL=https://api.example.com p
 - [ ] `CROSS_SITE_COOKIES` empty if you use subdomains
 - [ ] `KEY_ENCRYPTION_SECRET` stored somewhere safe
 - [ ] Repository variable `TIMEDESK_API_URL` set before the first release
+- [ ] Google Calendar (optional): client id and secret in the API project, redirect address registered, migration applied

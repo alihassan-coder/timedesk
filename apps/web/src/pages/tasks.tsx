@@ -1,56 +1,151 @@
 import { useState } from 'react'
-import { KanbanSquare, List, Plus, Repeat } from 'lucide-react'
+import { Calendar, CalendarDays, CalendarRange, ChevronLeft, ChevronRight, KanbanSquare, List, Plus, Repeat } from 'lucide-react'
 import {
   DUE_BUCKET_LABEL,
   DUE_BUCKET_ORDER,
+  addDays,
+  addMonths,
   dueBucket,
+  monthGrid,
+  startOfWeek,
+  toDateKey,
   type Priority,
   type Recurrence,
   type Task,
   type TaskStatus,
 } from '@timedesk/shared'
 import { PageHeader } from '@/components/page-header'
+import { ProjectDot } from '@/components/project-dot'
 import { Segmented } from '@/components/segmented'
 import { SimpleSelect } from '@/components/simple-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { actions, useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
+import { DayView, MonthView, WeekView } from '@/features/task-calendar'
+import { DropZone, taskDragProps } from '@/features/task-dnd'
 import { dueLabel, PRIORITY_LABEL, STATUS_LABEL } from '@/features/task-labels'
 import { StatusMenu, TaskRow } from '@/features/task-row'
-import { ProjectDot } from '@/components/project-dot'
+import { useGoogleEvents, useGoogleStatus } from '@/lib/google'
+import { cn } from '@/lib/utils'
 
-type View = 'list' | 'board'
+type View = 'list' | 'board' | 'day' | 'week' | 'month'
+const VIEW_KEY = 'timedesk:tasks-view'
+const VIEWS: View[] = ['list', 'board', 'day', 'week', 'month']
+
+function loadView(): View {
+  try {
+    const v = localStorage.getItem(VIEW_KEY)
+    if (VIEWS.includes(v as View)) return v as View
+  } catch {
+    // storage blocked: use the default
+  }
+  return 'list'
+}
+
+const fmt = (key: string, opts: Intl.DateTimeFormatOptions) => {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, opts)
+}
+
+/** The heading for the period being shown, for example "2 - 8 Nov 2026". */
+function periodTitle(view: View, anchor: string): string {
+  if (view === 'day') return fmt(anchor, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  if (view === 'month') return fmt(anchor, { month: 'long', year: 'numeric' })
+  const start = startOfWeek(anchor)
+  const [a, b] = [start, addDays(start, 6)].map((k) => {
+    const [y, m, d] = k.split('-').map(Number)
+    return new Date(y, m - 1, d)
+  })
+  // "Nov 2 - 8, 2026" (the format follows the person's language)
+  return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).formatRange(a, b)
+}
+
+function shift(view: View, anchor: string, dir: 1 | -1): string {
+  if (view === 'day') return addDays(anchor, dir)
+  if (view === 'week') return addDays(anchor, 7 * dir)
+  return addMonths(anchor, dir)
+}
+
+const viewLabel = (icon: React.ReactNode, text: string) => (
+  <>
+    {icon} <span className="hidden lg:inline">{text}</span>
+  </>
+)
 
 export default function TasksPage() {
   const { tasks, projects } = useStore()
   const now = useNow(false)
-  const [view, setView] = useState<View>('list')
+  const today = toDateKey(now)
+  const [view, setViewState] = useState<View>(loadView)
+  const [anchor, setAnchor] = useState(today)
   const [projectFilter, setProjectFilter] = useState('all')
   const [query, setQuery] = useState('')
+  const [adding, setAdding] = useState<{ due: string } | null>(null)
+
+  const setView = (v: View) => {
+    setViewState(v)
+    try {
+      localStorage.setItem(VIEW_KEY, v)
+    } catch {
+      // ignore
+    }
+  }
+  const openDay = (day: string) => {
+    setAnchor(day)
+    setView('day')
+  }
 
   const shown = tasks.filter(
     (t) =>
       (projectFilter === 'all' || t.projectId === projectFilter || (projectFilter === 'none' && !t.projectId)) &&
       t.title.toLowerCase().includes(query.toLowerCase()),
   )
+  const calendar = view === 'day' || view === 'week' || view === 'month'
+  // Google Calendar events for the days on screen, when the calendar is connected. Shown read-only next to the tasks.
+  const { status: google } = useGoogleStatus()
+  const [rangeFrom, rangeTo] =
+    view === 'day'
+      ? [anchor, addDays(anchor, 1)]
+      : view === 'week'
+        ? [startOfWeek(anchor), addDays(startOfWeek(anchor), 7)]
+        : (() => {
+            const grid = monthGrid(anchor)
+            return [grid[0][0], addDays(grid[grid.length - 1][6], 1)]
+          })()
+  const { events } = useGoogleEvents(rangeFrom, rangeTo, calendar && google?.connected === true)
+  const calendarProps = { tasks: shown, anchor, now, events, onOpenDay: openDay, onAdd: (day: string) => setAdding({ due: day }) }
 
   return (
     <>
       <PageHeader
         title="Tasks"
-        description="Daily todos grouped by when they are due. Change the status any time."
-        actions={<NewTaskDialog />}
+        description="Plan by list, board, day, week or month. Drag a task to move it."
+        actions={
+          <Button onClick={() => setAdding({ due: calendar ? anchor : '' })}>
+            <Plus /> New task
+          </Button>
+        }
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Input className="w-full sm:w-64" placeholder="Search tasks" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Segmented
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'list', label: viewLabel(<List />, 'List'), ariaLabel: 'List view' },
+            { value: 'board', label: viewLabel(<KanbanSquare />, 'Board'), ariaLabel: 'Board view' },
+            { value: 'day', label: viewLabel(<CalendarDays />, 'Day'), ariaLabel: 'Day view' },
+            { value: 'week', label: viewLabel(<CalendarRange />, 'Week'), ariaLabel: 'Week view' },
+            { value: 'month', label: viewLabel(<Calendar />, 'Month'), ariaLabel: 'Month view' },
+          ]}
+        />
+        <Input className="w-full sm:w-56" placeholder="Search tasks" value={query} onChange={(e) => setQuery(e.target.value)} />
         <SimpleSelect
-          className="w-48"
+          className="w-44"
           value={projectFilter}
           onChange={setProjectFilter}
           options={[
@@ -59,19 +154,34 @@ export default function TasksPage() {
             { value: 'none', label: 'No project' },
           ]}
         />
-        <div className="ml-auto">
-          <Segmented
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'list', label: <List />, ariaLabel: 'List view' },
-              { value: 'board', label: <KanbanSquare />, ariaLabel: 'Board view' },
-            ]}
-          />
-        </div>
       </div>
 
-      {view === 'list' ? <ListView tasks={shown} now={now} /> : <BoardView tasks={shown} now={now} />}
+      {calendar && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Button size="icon" variant="outline" aria-label="Previous" onClick={() => setAnchor(shift(view, anchor, -1))}>
+              <ChevronLeft />
+            </Button>
+            <Button size="icon" variant="outline" aria-label="Next" onClick={() => setAnchor(shift(view, anchor, 1))}>
+              <ChevronRight />
+            </Button>
+          </div>
+          <h2 className="text-lg font-semibold tracking-tight" aria-live="polite">
+            {periodTitle(view, anchor)}
+          </h2>
+          <Button size="sm" variant="ghost" className="ml-auto" disabled={anchor === today && view === 'day'} onClick={() => setAnchor(today)}>
+            Today
+          </Button>
+        </div>
+      )}
+
+      {view === 'list' && <ListView tasks={shown} now={now} />}
+      {view === 'board' && <BoardView tasks={shown} now={now} />}
+      {view === 'day' && <DayView {...calendarProps} />}
+      {view === 'week' && <WeekView {...calendarProps} />}
+      {view === 'month' && <MonthView {...calendarProps} />}
+
+      <NewTaskDialog open={adding !== null} defaultDue={adding?.due ?? ''} onClose={() => setAdding(null)} />
     </>
   )
 }
@@ -115,6 +225,8 @@ function ListView({ tasks, now }: { tasks: Task[]; now: number }) {
   )
 }
 
+const COLUMN_DOT: Record<TaskStatus, string> = { todo: 'bg-muted-foreground/50', in_progress: 'bg-primary', done: 'bg-emerald-500' }
+
 function BoardView({ tasks, now }: { tasks: Task[]; now: number }) {
   const { projects } = useStore()
   const columns = Object.keys(STATUS_LABEL) as TaskStatus[]
@@ -123,18 +235,25 @@ function BoardView({ tasks, now }: { tasks: Task[]; now: number }) {
       {columns.map((status) => {
         const items = tasks.filter((t) => t.status === status)
         return (
-          <Card key={status} className="bg-muted/30">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                {STATUS_LABEL[status]} <Badge variant="secondary">{items.length}</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
+          <DropZone
+            key={status}
+            onDropTask={(id) => void actions.setStatus(id, status)}
+            className="bg-muted/30 flex min-h-64 flex-col gap-3 rounded-xl border p-3"
+          >
+            <h2 className="flex items-center gap-2 text-sm font-medium">
+              <span aria-hidden className={cn('size-2 rounded-full', COLUMN_DOT[status])} />
+              {STATUS_LABEL[status]} <Badge variant="secondary">{items.length}</Badge>
+            </h2>
+            <div className="flex-1 space-y-2">
               {items.map((t) => {
                 const project = projects.find((p) => p.id === t.projectId)
                 return (
-                  <div key={t.id} className="bg-card space-y-2 rounded-lg border p-3 text-sm shadow-xs">
-                    <p className="font-medium">{t.title}</p>
+                  <div
+                    key={t.id}
+                    {...taskDragProps(t.id)}
+                    className="bg-card cursor-grab space-y-2 rounded-lg border p-3 text-sm shadow-xs transition-shadow hover:shadow-md active:cursor-grabbing"
+                  >
+                    <p className={cn('font-medium', t.status === 'done' && 'text-muted-foreground line-through')}>{t.title}</p>
                     <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
                       {project && (
                         <span className="flex items-center gap-1.5">
@@ -153,22 +272,31 @@ function BoardView({ tasks, now }: { tasks: Task[]; now: number }) {
                   </div>
                 )
               })}
-              {items.length === 0 && <p className="text-muted-foreground text-xs">Nothing here.</p>}
-            </CardContent>
-          </Card>
+              {items.length === 0 && (
+                <p className="text-muted-foreground rounded-lg border border-dashed py-8 text-center text-xs">Drop a task here</p>
+              )}
+            </div>
+          </DropZone>
         )
       })}
     </div>
   )
 }
 
-function NewTaskDialog() {
+function NewTaskDialog({ open, defaultDue, onClose }: { open: boolean; defaultDue: string; onClose: () => void }) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>{open && <NewTaskForm key={defaultDue} defaultDue={defaultDue} onClose={onClose} />}</DialogContent>
+    </Dialog>
+  )
+}
+
+function NewTaskForm({ defaultDue, onClose }: { defaultDue: string; onClose: () => void }) {
   const { projects } = useStore()
-  const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [projectId, setProjectId] = useState('none')
   const [priority, setPriority] = useState<Priority>('medium')
-  const [due, setDue] = useState('')
+  const [due, setDue] = useState(defaultDue)
   const [repeat, setRepeat] = useState<'none' | Recurrence['freq']>('none')
 
   function submit() {
@@ -180,78 +308,70 @@ function NewTaskDialog() {
       due: due || null,
       recurrence: repeat === 'none' ? null : { freq: repeat, every: repeat === 'custom' ? 3 : undefined },
     })
-    setTitle('')
-    setDue('')
-    setRepeat('none')
-    setOpen(false)
+    onClose()
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button />}>
-        <Plus /> New task
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>New task</DialogTitle>
-        </DialogHeader>
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault()
-            submit()
-          }}
-        >
+    <>
+      <DialogHeader>
+        <DialogTitle>New task</DialogTitle>
+      </DialogHeader>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}
+      >
+        <div className="space-y-2">
+          <Label htmlFor="title">Title</Label>
+          <Input id="title" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What needs doing?" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="title">Title</Label>
-            <Input id="title" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What needs doing?" />
+            <Label>Project</Label>
+            <SimpleSelect
+              className="w-full"
+              value={projectId}
+              onChange={setProjectId}
+              options={[{ value: 'none', label: 'No project' }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+            />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Project</Label>
-              <SimpleSelect
-                className="w-full"
-                value={projectId}
-                onChange={setProjectId}
-                options={[{ value: 'none', label: 'No project' }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Priority</Label>
-              <SimpleSelect
-                className="w-full"
-                value={priority}
-                onChange={setPriority}
-                options={(Object.keys(PRIORITY_LABEL) as Priority[]).map((p) => ({ value: p, label: PRIORITY_LABEL[p] }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="due">Due date</Label>
-              <Input id="due" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Repeat</Label>
-              <SimpleSelect
-                className="w-full"
-                value={repeat}
-                onChange={setRepeat}
-                options={[
-                  { value: 'none', label: 'Does not repeat' },
-                  { value: 'daily', label: 'Daily' },
-                  { value: 'weekly', label: 'Weekly' },
-                  { value: 'monthly', label: 'Monthly' },
-                  { value: 'custom', label: 'Every 3 days' },
-                ]}
-              />
-            </div>
+          <div className="space-y-2">
+            <Label>Priority</Label>
+            <SimpleSelect
+              className="w-full"
+              value={priority}
+              onChange={setPriority}
+              options={(Object.keys(PRIORITY_LABEL) as Priority[]).map((p) => ({ value: p, label: PRIORITY_LABEL[p] }))}
+            />
           </div>
-          <DialogFooter>
-            <Button type="submit" disabled={!title.trim()}>
-              Add task
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          <div className="space-y-2">
+            <Label htmlFor="due">Due date</Label>
+            <Input id="due" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>Repeat</Label>
+            <SimpleSelect
+              className="w-full"
+              value={repeat}
+              onChange={setRepeat}
+              options={[
+                { value: 'none', label: 'Does not repeat' },
+                { value: 'daily', label: 'Daily' },
+                { value: 'weekly', label: 'Weekly' },
+                { value: 'monthly', label: 'Monthly' },
+                { value: 'custom', label: 'Every 3 days' },
+              ]}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="submit" disabled={!title.trim()}>
+            Add task
+          </Button>
+        </DialogFooter>
+      </form>
+    </>
   )
 }

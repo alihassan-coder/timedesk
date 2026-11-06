@@ -7,7 +7,13 @@ import type { CreateTask, UpdateTask } from '../validators/index.ts'
 
 const t = schema.tasks
 
-export function createTaskService(db: Db) {
+/** Called after a task changes, so something else (Google Calendar) can follow. Failures there must never fail the task. */
+export interface TaskHooks {
+  changed(userId: string, task: typeof schema.tasks.$inferSelect): Promise<void>
+  removed(userId: string, taskId: string): Promise<void>
+}
+
+export function createTaskService(db: Db, hooks?: TaskHooks) {
   const owned = (userId: string, id: string) => and(eq(t.id, id), eq(t.userId, userId), isNull(t.deletedAt))
 
   return {
@@ -19,6 +25,7 @@ export function createTaskService(db: Db) {
         .insert(t)
         .values({ ...input, id: input.id ?? crypto.randomUUID(), userId: user.id, workspaceId: user.id })
         .returning()
+      await hooks?.changed(user.id, row)
       return row
     },
 
@@ -28,8 +35,10 @@ export function createTaskService(db: Db) {
       if (!before) throw notFound('Task')
       const [row] = await db.update(t).set({ ...patch, updatedAt: new Date() }).where(owned(userId, id)).returning()
 
+      await hooks?.changed(userId, row)
+
       if (patch.status === 'done' && before.status !== 'done' && before.recurrence && before.due) {
-        await db.insert(t).values({
+        const [next] = await db.insert(t).values({
           id: crypto.randomUUID(),
           userId,
           workspaceId: before.workspaceId,
@@ -39,7 +48,8 @@ export function createTaskService(db: Db) {
           status: 'todo',
           due: nextDue(before.due, before.recurrence),
           recurrence: before.recurrence,
-        })
+        }).returning()
+        await hooks?.changed(userId, next)
       }
       return row
     },
@@ -48,6 +58,7 @@ export function createTaskService(db: Db) {
       const now = new Date()
       const [row] = await db.update(t).set({ deletedAt: now, updatedAt: now }).where(owned(userId, id)).returning({ id: t.id })
       if (!row) throw notFound('Task')
+      await hooks?.removed(userId, id)
     },
   }
 }

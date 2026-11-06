@@ -68,7 +68,7 @@ export async function listModels(provider: AiProvider, apiKey: string): Promise<
     const json = (await res.json()) as { data?: { id: string }[] }
     let ids = (json.data ?? []).map((m) => m.id)
     if (provider === 'openai') ids = ids.filter((id) => /^(gpt|o\d|chatgpt)/.test(id) && !/(embed|audio|realtime|image|tts|whisper|transcribe|moderation|search)/.test(id))
-    if (provider === 'groq') ids = ids.filter((id) => !/(whisper|tts|guard|playai)/.test(id))
+    if (provider === 'groq') ids = ids.filter((id) => !/(whisper|tts|guard|playai|orpheus|transcribe)/.test(id))
     return ids.length ? ids.sort() : fallback
   } catch {
     return fallback

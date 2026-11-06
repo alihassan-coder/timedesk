@@ -33,7 +33,20 @@ export function createRoutes(c: Controllers) {
 
   r.post('/activity', c.activity.ingest)
   r.get('/activity/summary', c.activity.summary)
+  r.get('/activity/sessions', c.activity.sessions)
+  r.delete('/activity/:id', c.activity.removeOne)
   r.delete('/activity', c.activity.clear)
+
+  r.get('/integrations/google', c.google.status)
+  r.patch('/integrations/google', c.google.settings)
+  r.post('/integrations/google/connect', c.google.connect)
+  r.delete('/integrations/google', c.google.disconnect)
+
+  r.get('/calendar/events', c.calendar.events)
+  r.post('/calendar/events', c.calendar.create)
+  r.patch('/calendar/events/:id', c.calendar.update)
+  r.delete('/calendar/events/:id', c.calendar.remove)
+  r.post('/calendar/sync', c.calendar.sync)
 
   r.get('/chats', c.chats.list)
   r.get('/chats/:id', c.chats.get)

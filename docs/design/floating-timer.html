@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Floating timer design</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one interactive "desktop" stage on top, then four small tools below. Matches the app: shadcn blue accent, quiet neutrals. */
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --fg: #12151c;
+  --muted: #656d7e;
+  --line: #e3e6ec;
+  --accent: #2459e6;
+  --accent-fg: #ffffff;
+  --accent-soft: #e8eefc;
+  --ok: #17a05d;
+  --warn: #d9822b;
+  --stop: #d83a3a;
+  --desk-a: #cfd9ee;
+  --desk-b: #e9d9e8;
+  --panel: #1c2028;
+  --panel-fg: #e8ebf2;
+  --shadow: 0 10px 30px rgba(20, 30, 60, .18), 0 2px 6px rgba(20, 30, 60, .12);
+  --font: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1015; --surface: #171a21; --fg: #eceff6; --muted: #98a1b3; --line: #272c37;
+    --accent: #6d92ff; --accent-fg: #0b1020; --accent-soft: #1b2440;
+    --desk-a: #232c45; --desk-b: #3a2a3e; --panel: #0b0d12; --shadow: 0 10px 30px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.4);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1015; --surface: #171a21; --fg: #eceff6; --muted: #98a1b3; --line: #272c37;
+  --accent: #6d92ff; --accent-fg: #0b1020; --accent-soft: #1b2440;
+  --desk-a: #232c45; --desk-b: #3a2a3e; --panel: #0b0d12; --shadow: 0 10px 30px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.4);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font); padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 56px; line-height: 1.5; font-size: 15px; }
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 28px; }
+h1 { font-size: clamp(26px, 4vw, 36px); letter-spacing: -.02em; margin: 0; text-wrap: balance; }
+h2 { font-size: 18px; margin: 0 0 4px; letter-spacing: -.01em; }
+p { margin: 0; }
+.lead { color: var(--muted); max-width: 62ch; margin-top: 6px; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+.modes { display: flex; flex-wrap: wrap; gap: 6px; }
+.modes button { font: inherit; font-weight: 500; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+.modes button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.modes button:focus-visible, .btn:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 1px; }
+
+/* ---- the faux Linux desktop ---- */
+.stage { position: relative; aspect-ratio: 16 / 10; min-height: 360px; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); background: linear-gradient(135deg, var(--desk-a), var(--desk-b)); }
+.win { position: absolute; inset: 7% 22% 17% 6%; background: var(--surface); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; display: grid; grid-template-rows: 26px 1fr; }
+.win .bar { background: var(--accent-soft); display: flex; align-items: center; gap: 5px; padding-inline: 10px; font-size: 11px; color: var(--muted); }
+.win .bar i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); display: inline-block; }
+.win .body { padding: 14px; display: grid; gap: 8px; align-content: start; }
+.win .ln { height: 9px; border-radius: 5px; background: var(--line); }
+.win .ln.b { background: var(--accent-soft); width: 46%; height: 12px; }
+.panel { position: absolute; left: 0; right: 0; bottom: 0; height: 38px; background: var(--panel); color: var(--panel-fg); display: flex; align-items: center; gap: 14px; padding-inline: 14px; font-size: 12.5px; }
+.panel .app { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 6px; background: rgba(255,255,255,.1); max-width: 55%; }
+.panel .app .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--stop); flex: none; animation: pulse 1.6s ease-in-out infinite; }
+.panel .app span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel .sp { flex: 1; }
+.panel .tray { display: flex; gap: 10px; align-items: center; opacity: .85; }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .panel .app .dot, .ring .arc { animation: none; transition: none; } }
+
+/* ---- widget variants ---- */
+.w { position: absolute; background: var(--surface); color: var(--fg); border-radius: 14px; box-shadow: var(--shadow); border: 1px solid var(--line); }
+.w[hidden] { display: none; }
+.pill { right: 4%; bottom: 62px; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: 999px; }
+.pill .t { font-family: var(--mono); font-weight: 600; font-size: 17px; font-variant-numeric: tabular-nums; }
+.pill .n { font-size: 12.5px; color: var(--muted); max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot-live { width: 9px; height: 9px; border-radius: 50%; background: var(--stop); animation: pulse 1.6s ease-in-out infinite; flex: none; }
+.btn { width: 32px; height: 32px; border-radius: 50%; border: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; background: var(--accent-soft); color: var(--accent); font: inherit; }
+.btn.stop { background: var(--stop); color: #fff; }
+.btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+.card { right: 4%; bottom: 62px; width: min(290px, 46%); padding: 14px; display: grid; gap: 12px; }
+.card .top { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--muted); }
+.card .big { font-family: var(--mono); font-weight: 600; font-size: 34px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+.card .task { font-weight: 600; }
+.card .proj { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.card .proj i { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); display: inline-block; }
+.card .row { display: flex; gap: 8px; }
+.card .row .btn { width: auto; flex: 1; height: 34px; border-radius: 9px; font-weight: 600; font-size: 13px; gap: 6px; }
+.goal { display: grid; gap: 5px; font-size: 11.5px; color: var(--muted); }
+.goal .track { height: 6px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.goal .fill { height: 100%; width: 63%; background: var(--accent); border-radius: 4px; }
+
+.dock { left: 0; right: 0; bottom: 38px; border-radius: 0; border-width: 1px 0 0; display: flex; align-items: center; gap: 14px; padding: 7px 14px; }
+.dock .t { font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dock .n { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.dock .g { width: 90px; }
+.dock .btn { width: 28px; height: 28px; }
+
+.pomo { right: 4%; bottom: 62px; width: min(270px, 46%); padding: 16px; display: grid; justify-items: center; gap: 10px; text-align: center; }
+.ring { position: relative; width: 132px; height: 132px; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring .bg { stroke: var(--line); } .ring .arc { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+.ring .c { position: absolute; inset: 0; display: grid; place-content: center; }
+.ring .c b { font-family: var(--mono); font-size: 28px; font-variant-numeric: tabular-nums; }
+.ring .c span { font-size: 11.5px; color: var(--muted); }
+.cap { margin-top: 10px; color: var(--muted); font-size: 13.5px; max-width: 70ch; }
+.cap b { color: var(--fg); font-weight: 600; }
+
+/* ---- tool cards ---- */
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.tool { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.kbd { font-family: var(--mono); font-size: 11.5px; padding: 2px 7px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: var(--bg); white-space: nowrap; }
+.pal { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
+.pal .in { padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
+.pal .it { padding: 8px 12px; font-size: 13.5px; display: flex; justify-content: space-between; gap: 8px; }
+.pal .it.on { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.pal .it small { color: var(--muted); }
+.pal .grp { padding: 7px 12px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; }
+.qa { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; background: var(--bg); }
+.qa .field { font-size: 15px; font-weight: 500; }
+.qa .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+.chip.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 500; }
+.idle { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--bg); display: grid; gap: 10px; }
+.idle .rowb { display: flex; gap: 8px; flex-wrap: wrap; }
+.pbtn { font: inherit; font-size: 13px; font-weight: 600; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); }
+.pbtn.p { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.ringsm { display: flex; align-items: center; gap: 14px; }
+.ringsm svg { width: 84px; height: 84px; transform: rotate(-90deg); flex: none; }
+.legend { display: grid; gap: 2px; font-size: 13px; }
+.legend b { font-size: 20px; font-family: var(--mono); }
+</style>
+</head><body>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">timedesk desktop · design preview</div>
+    <h1>See your timer without opening the app</h1>
+    <p class="lead">A small window stays on top of everything. Pick a style below to see it on a Linux desktop. The clock is live.</p>
+  </header>
+
+  <section>
+    <div class="modes" role="group" aria-label="Widget style">
+      <button type="button" data-m="pill" aria-pressed="true">Compact</button>
+      <button type="button" data-m="card" aria-pressed="false">Expanded</button>
+      <button type="button" data-m="dock" aria-pressed="false">Bottom bar</button>
+      <button type="button" data-m="pomo" aria-pressed="false">Pomodoro</button>
+    </div>
+
+    <div class="stage" id="stage" style="margin-top:14px">
+      <div class="win" aria-hidden="true">
+        <div class="bar"><i></i><i></i><i></i>&nbsp; Your editor, browser, anything</div>
+        <div class="body"><div class="ln b"></div><div class="ln" style="width:88%"></div><div class="ln" style="width:72%"></div><div class="ln" style="width:80%"></div><div class="ln" style="width:55%"></div></div>
+      </div>
+
+      <div class="w pill" data-w="pill">
+        <span class="dot-live"></span>
+        <span class="t clock">00:42:10</span>
+        <span class="n">Write docs</span>
+        <button class="btn stop" type="button" aria-label="Stop timer"><svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button>
+      </div>
+
+      <div class="w card" data-w="card" hidden>
+        <div class="top"><span style="display:flex;align-items:center;gap:6px"><span class="dot-live"></span> Tracking</span><span class="kbd">Ctrl+Alt+T</span></div>
+        <div class="big clock">00:42:10</div>
+        <div><div class="task">Write docs</div><div class="proj"><i></i> Website launch</div></div>
+        <div class="goal"><div style="display:flex;justify-content:space-between"><span>Today</span><span class="num">3h 45m of 6h</span></div><div class="track"><div class="fill"></div></div></div>
+        <div class="row"><button class="btn" type="button">Pause</button><button class="btn stop" type="button">Stop</button></div>
+      </div>
+
+      <div class="w dock" data-w="dock" hidden>
+        <span class="dot-live"></span>
+        <span class="t clock">00:42:10</span>
+        <span class="n">Write docs · Website launch</span>
+        <div class="goal g"><div class="track"><div class="fill"></div></div></div>
+        <span class="num" style="font-size:12px;color:var(--muted)">3h 45m today</span>
+        <button class="btn" type="button" aria-label="Pause"><svg viewBox="0 0 16 16"><rect x="3" y="3" width="3.5" height="10" rx="1"/><rect x="9.5" y="3" width="3.5" height="10" rx="1"/></svg></button>
+        <button class="btn stop" type="button" aria-label="Stop"><svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button>
+      </div>
+
+      <div class="w pomo" data-w="pomo" hidden>
+        <div class="eyebrow">Focus 2 of 4</div>
+        <div class="ring"><svg viewBox="0 0 100 100"><circle class="bg" cx="50" cy="50" r="44" fill="none" stroke-width="7"/><circle class="arc" id="arc" cx="50" cy="50" r="44" fill="none" stroke-width="7" stroke-dasharray="276.5" stroke-dashoffset="100"/></svg><div class="c"><b id="pc">16:12</b><span>left of 25:00</span></div></div>
+        <div style="font-weight:600">Write docs</div>
+        <div class="row" style="display:flex;gap:8px;width:100%"><button class="btn" type="button" style="width:auto;flex:1;border-radius:9px;height:34px;font-weight:600;font-size:13px">Pause</button><button class="btn" type="button" style="width:auto;flex:1;border-radius:9px;height:34px;font-weight:600;font-size:13px">Skip break</button></div>
+      </div>
+
+      <div class="panel">
+        <span style="opacity:.8">Activities</span>
+        <div class="app"><span class="dot"></span><span class="clock-title">● 00:42:10 · Write docs — timedesk</span></div>
+        <span class="sp"></span>
+        <span class="tray"><span class="num">Tue 6 Nov 14:08</span></span>
+      </div>
+    </div>
+    <p class="cap" id="cap"></p>
+  </section>
+
+  <section>
+    <h2>Small things that make it feel finished</h2>
+    <p class="lead" style="margin-bottom:14px">Each one is a few clicks saved, many times a day.</p>
+    <div class="grid">
+      <div class="tool">
+        <div><div class="eyebrow">Command palette</div><h2 style="margin-top:4px">Press <span class="kbd">Ctrl</span> <span class="kbd">K</span> anywhere</h2></div>
+        <div class="pal">
+          <div class="in"><span>start wri<span style="color:var(--accent)">|</span></span><span class="kbd">esc</span></div>
+          <div class="grp">Tasks</div>
+          <div class="it on"><span>▶ Start timer: Write docs</span><small>Enter</small></div>
+          <div class="it"><span>▶ Start timer: Write release notes</span><small></small></div>
+          <div class="grp">Go to</div>
+          <div class="it"><span>Tasks</span><small>G T</small></div>
+          <div class="it"><span>Reports</span><small>G R</small></div>
+        </div>
+      </div>
+
+      <div class="tool">
+        <div><div class="eyebrow">Quick add</div><h2 style="margin-top:4px"><span class="kbd">Ctrl</span> <span class="kbd">Alt</span> <span class="kbd">N</span> from any program</h2></div>
+        <div class="qa">
+          <div class="field">Call the printer company tomorrow</div>
+          <div class="chips"><span class="chip on">Tomorrow</span><span class="chip">High</span><span class="chip">Website launch</span><span class="chip">Repeat</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:12px;color:var(--muted)">It understands dates in plain words</span><span class="kbd">Enter</span></div>
+        </div>
+      </div>
+
+      <div class="tool">
+        <div><div class="eyebrow">Daily goal</div><h2 style="margin-top:4px">A ring that fills as you work</h2></div>
+        <div class="ringsm">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="var(--line)" stroke-width="10"/><circle cx="50" cy="50" r="42" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" stroke-dasharray="263.9" stroke-dashoffset="97.6"/></svg>
+          <div class="legend"><b>63%</b><span>3h 45m of 6h</span><span style="color:var(--muted)">Best day this week: Tue</span></div>
+        </div>
+      </div>
+
+      <div class="tool">
+        <div><div class="eyebrow">Idle check</div><h2 style="margin-top:4px">Away for a while? It asks.</h2></div>
+        <div class="idle">
+          <div style="font-weight:600">You were away for 12 minutes</div>
+          <div style="color:var(--muted);font-size:13.5px">Timer was running on <b style="color:var(--fg)">Write docs</b> since 13:56.</div>
+          <div class="rowb"><button class="pbtn" type="button">Keep the time</button><button class="pbtn p" type="button">Remove 12 min</button><button class="pbtn" type="button">Stop at 13:56</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var secs = 2530; // 00:42:10
+  var pomo = 972;  // 16:12 left of 25:00
+  var DAY = 6 * 3600;
+  var caps = {
+    pill: '<b>Compact.</b> A rounded pill that sits in a corner. Drag it anywhere. It shows the running time and the task, and one click stops it.',
+    card: '<b>Expanded.</b> The same window with a big clock, the project, your daily goal and Pause / Stop. Double-click the compact pill to open it.',
+    dock: '<b>Bottom bar.</b> Snaps to the bottom edge, full width and one line high, so it never covers your work. It sits right above the Linux panel.',
+    pomo: '<b>Pomodoro.</b> 25 minutes of focus, then a short break. The ring shows what is left, and a notification tells you when to switch.'
+  };
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function fmt(s) { return pad(Math.floor(s / 3600)) + ':' + pad(Math.floor(s % 3600 / 60)) + ':' + pad(s % 60); }
+  function render() {
+    var t = fmt(secs);
+    document.querySelectorAll('.clock').forEach(function (el) { el.textContent = t; });
+    var title = document.querySelector('.clock-title');
+    if (title) title.textContent = '● ' + t + ' · Write docs — timedesk';
+    document.getElementById('pc').textContent = pad(Math.floor(pomo / 60)) + ':' + pad(pomo % 60);
+    document.getElementById('arc').style.strokeDashoffset = String(276.5 * (1 - pomo / 1500));
+  }
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  setInterval(function () { secs += 1; pomo = pomo > 0 ? pomo - 1 : 1500; render(); }, 1000);
+  render();
+
+  var buttons = document.querySelectorAll('.modes button');
+  function show(m) {
+    buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.m === m)); });
+    document.querySelectorAll('[data-w]').forEach(function (w) { w.hidden = w.dataset.w !== m; });
+    document.getElementById('cap').innerHTML = caps[m];
+  }
+  buttons.forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.m); }); });
+  show('pill');
+  void reduce; void DAY;
+})();
+</script>
+
+</body>
+</html>

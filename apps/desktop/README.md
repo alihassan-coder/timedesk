@@ -65,3 +65,16 @@ src/tray.ts  src/autostart.ts  src/window-state.ts  src/offline.html
 scripts/            build (esbuild) and dev launcher
 e2e/                real-window tests
 ```
+
+## Floating timer, shortcuts and idle check
+
+The floating timer is a second small window that loads the `/widget` page of the same interface (no separate UI code). Quick add is the `/quick-add` page in another small window. Both reuse the sign-in, theme and data of the main window; changes in one window tell the others to reload at once.
+
+| Setting (Settings, Desktop) | What it does |
+|---|---|
+| Style | Compact, Expanded, Bottom bar or Pomodoro. The window resizes to fit |
+| When to show it | Automatic (a timer runs and timedesk is not the window in front), Always, or Never |
+| Keyboard shortcuts | Ctrl+Alt+T start/stop, Ctrl+Alt+N quick add |
+| Ask about idle time | Off, or after 5/10/15/30 minutes away |
+
+Linux notes: global shortcuts and always-on-top windows work on X11. Some Wayland desktops do not allow apps to register global shortcuts or keep a window on top; the app logs that and keeps working without them. GNOME hides tray icons unless the AppIndicator extension is installed, which is why the running time is also put in the window title and the floating timer.

@@ -137,15 +137,16 @@ export function Composer({
             ai.select(p as ProviderId, rest.join(':'))
           }}
         >
-          <SelectTrigger size="sm" className="max-w-56 border-0 shadow-none" aria-label="Model">
+          <SelectTrigger size="sm" className="text-muted-foreground hover:text-foreground max-w-64 min-w-0 border-0 shadow-none" aria-label="Model">
             <SelectValue placeholder="Add an API key" />
           </SelectTrigger>
-          <SelectContent>
+          {/* Wider than the trigger so long model names fit, opens upward, and scrolls when the list is long. */}
+          <SelectContent side="top" align="start" alignItemWithTrigger={false} className="max-h-80 w-auto max-w-[min(26rem,92vw)] min-w-72">
             {ai.providers.map((g) => (
               <SelectGroup key={g.provider}>
-                <SelectLabel>{g.name}</SelectLabel>
+                <SelectLabel className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide uppercase">{g.name}</SelectLabel>
                 {g.models.map((model) => (
-                  <SelectItem key={model} value={`${g.provider}:${model}`}>
+                  <SelectItem key={model} value={`${g.provider}:${model}`} className="py-1.5 pr-8 pl-2">
                     {model}
                   </SelectItem>
                 ))}

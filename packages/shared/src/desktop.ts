@@ -22,9 +22,27 @@ export interface DesktopSettings {
   trackApps: boolean
   /** Also record window titles (otherwise only app names). */
   trackTitles: boolean
+  /** The small floating timer: only while another window is in front ("auto"), all the time, or never. */
+  widget: 'auto' | 'always' | 'never'
+  widgetMode: WidgetMode
+  /** System-wide keys: Ctrl+Alt+T starts or stops the timer, Ctrl+Alt+N adds a task. */
+  shortcuts: boolean
+  /** Ask what to do with the time when you come back after being away this many minutes. 0 turns it off. */
+  idleMinutes: number
 }
 
-export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = { autoStart: false, closeToTray: true, trackApps: false, trackTitles: true }
+export type WidgetMode = 'compact' | 'expanded' | 'dock' | 'pomodoro'
+
+export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
+  autoStart: false,
+  closeToTray: true,
+  trackApps: false,
+  trackTitles: true,
+  widget: 'auto',
+  widgetMode: 'compact',
+  shortcuts: true,
+  idleMinutes: 5,
+}
 
 export interface AppInfo {
   /** "bundled": the app opens its own copy of the interface. "remote": it opens a website address (development). */
@@ -46,9 +64,18 @@ export interface TimerState {
   running: boolean
   label: string
   startedAt: number | null
+  /** Show the running time in the window title. Defaults to yes. */
+  showInTitle?: boolean
 }
 
 export type TrayAction = 'toggle-timer'
+
+/** What the person chose after being away: take the idle minutes off the timer (and keep going), or stop it when they left. */
+export interface IdleDecision {
+  action: 'remove' | 'stop'
+  /** When the person went idle, ms since 1970. */
+  at: number
+}
 
 /** The login token, kept encrypted by the operating system (Windows DPAPI, Linux keyring), never in page storage. */
 export interface TokenStore {
@@ -76,4 +103,15 @@ export interface TimedeskBridge {
   installUpdate(): void
   onUpdate(cb: (status: UpdateStatus) => void): () => void
   onTrayAction(cb: (action: TrayAction) => void): () => void
+  /** The floating timer and quick-add windows are pages of the same app. These let them act like windows of it. */
+  hideWidget(): void
+  openMainWindow(): void
+  /** Closes the quick-add window (and only that, or the floating timer). */
+  closeOwnWindow(): void
+  /** Tell the other windows the tasks or the timer changed, so they reload at once. */
+  dataChanged(): void
+  onDataChanged(cb: () => void): () => void
+  onIdleDecision(cb: (d: IdleDecision) => void): () => void
+  /** The quick-add window was opened (with the shortcut): clear it and focus the text box. */
+  onQuickAddShown(cb: () => void): () => void
 }

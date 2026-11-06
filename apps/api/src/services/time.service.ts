@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, isNull, lt } from 'drizzle-orm'
 import { schema, type Db } from '@timedesk/db'
-import { conflict } from '../utils/errors.ts'
+import { AppError, conflict } from '../utils/errors.ts'
 import type { SessionUser } from '../types.ts'
 import type { StartTimer } from '../validators/index.ts'
 
@@ -33,9 +33,15 @@ export function createTimeService(db: Db) {
       return row
     },
 
-    async stop(userId: string) {
+    /** Stops the running timer now, or at `endedAt` (not before it started, not in the future). */
+    async stop(userId: string, endedAt?: Date) {
       const now = new Date()
-      const [row] = await db.update(e).set({ endedAt: now, updatedAt: now }).where(running(userId)).returning()
+      const [current] = await db.select().from(e).where(running(userId))
+      if (!current) throw conflict('No timer is running.')
+      const end = endedAt ?? now
+      if (end < current.startedAt) throw new AppError(422, 'The end time is before the timer started.')
+      if (end.getTime() > now.getTime() + 5000) throw new AppError(422, 'The end time is in the future.')
+      const [row] = await db.update(e).set({ endedAt: end, updatedAt: now }).where(running(userId)).returning()
       if (!row) throw conflict('No timer is running.')
       return row
     },

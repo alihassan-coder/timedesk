@@ -5,7 +5,7 @@ A TimeCamp-style work platform for one person and a team of 3-5: time tracking, 
 ## Features by area
 | Area | Features | Where it works |
 |---|---|---|
-| Plan | Projects; tasks with status (todo / in progress / done), priority, due date, recurrence (daily/weekly/monthly/custom); due categories (overdue, today, tomorrow, this week, later, no date); list + board view | Web |
+| Plan | Projects; tasks with status (todo / in progress / done), priority, due date, recurrence (daily/weekly/monthly/custom); due categories (overdue, today, tomorrow, this week, later, no date); list, board, day, week and month views with drag and drop; edit and delete projects | Web |
 | Track | Top-bar timer, stopwatch, weekly timesheet | Web |
 | Auto-track | Which apps and sites you use, live | **Desktop only** (Chrome extension for sites later) |
 | Insights | Dashboard with graphs, reports (day/month/quarter/year), weekly review, activity feed | Web |

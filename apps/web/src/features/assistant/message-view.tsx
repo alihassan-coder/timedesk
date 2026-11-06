@@ -1,5 +1,6 @@
 import { Check, Loader2, Sparkles, X } from 'lucide-react'
 import type { UIMessage } from 'ai'
+import { Markdown } from '@/components/markdown'
 import { TOOL_LABELS } from './tool-labels'
 
 /** Claude-style: your messages in a soft bubble, the assistant's answer as plain text on the page. */
@@ -20,11 +21,7 @@ export function MessageView({ message }: { message: UIMessage }) {
       <div className="min-w-0 flex-1 space-y-3">
         {message.parts.map((part, i) => {
           if (part.type === 'text') {
-            return part.text ? (
-              <p key={i} className="leading-relaxed whitespace-pre-wrap">
-                {part.text}
-              </p>
-            ) : null
+            return part.text ? <Markdown key={i}>{part.text}</Markdown> : null
           }
           if (part.type.startsWith('tool-')) {
             const name = part.type.slice('tool-'.length)

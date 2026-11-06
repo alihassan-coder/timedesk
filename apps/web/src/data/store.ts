@@ -122,10 +122,26 @@ export interface NewTask {
   recurrence: Recurrence | null
 }
 
+/**
+ * Called after every change this window makes to tasks or the timer. The desktop app uses it to tell its other
+ * windows (floating timer, quick add) to reload at once.
+ */
+let mutationHook: (() => void) | null = null
+export function setMutationHook(fn: (() => void) | null) {
+  mutationHook = fn
+}
+
+/** What the most recent timer was on, so "resume" can start it again. */
+export function lastTimerTarget(entries: TimeEntry[]): { taskId: string | null; projectId: string | null } | null {
+  const last = [...entries].sort((a, b) => b.startedAt - a.startedAt)[0]
+  return last ? { taskId: last.taskId, projectId: last.projectId } : null
+}
+
 /** Runs an API call after an optimistic update. On failure, reload the truth from the server. */
 async function sync(call: () => Promise<unknown>) {
   try {
     await call()
+    mutationHook?.()
   } catch (e) {
     await loadStore()
     set({ error: message(e) })
@@ -156,6 +172,13 @@ export const actions = {
     if (status === 'done' && task.status !== 'done' && task.recurrence && task.due) await loadStore()
   },
 
+  /** Edit any task fields, for example drag a task to another day. */
+  async updateTask(taskId: string, patch: Partial<Pick<Task, 'title' | 'due' | 'priority' | 'projectId' | 'status'>>) {
+    if (!state.tasks.some((t) => t.id === taskId)) return
+    set({ tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)) })
+    await sync(() => api(`/tasks/${taskId}`, { method: 'PATCH', body: patch }))
+  },
+
   async deleteTask(taskId: string) {
     set({ tasks: state.tasks.filter((t) => t.id !== taskId) })
     await sync(() => api(`/tasks/${taskId}`, { method: 'DELETE' }))
@@ -170,6 +193,28 @@ export const actions = {
     await sync(() => api('/projects', { method: 'POST', body: project }))
   },
 
+  async updateProject(id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'color'>>) {
+    const clean = { ...patch, ...(patch.name !== undefined ? { name: patch.name.trim() } : {}) }
+    if (clean.name === '') return
+    set({ projects: state.projects.map((p) => (p.id === id ? { ...p, ...clean } : p)) })
+    await sync(() => api(`/projects/${id}`, { method: 'PATCH', body: clean }))
+  },
+
+  /** The server keeps the project's tasks and tracked time: they become "no project". */
+  async deleteProject(id: string) {
+    set({
+      projects: state.projects.filter((p) => p.id !== id),
+      tasks: state.tasks.map((t) => (t.projectId === id ? { ...t, projectId: null } : t)),
+      entries: state.entries.map((e) => (e.projectId === id ? { ...e, projectId: null } : e)),
+    })
+    await sync(() => api(`/projects/${id}`, { method: 'DELETE' }))
+  },
+
+  /** Starts the timer on whatever the last one was on. Falls back to a plain stopwatch. */
+  async resumeLast() {
+    await actions.startTimer(lastTimerTarget(state.entries) ?? {})
+  },
+
   /** Only one timer runs at a time. The server stops any running one, and we mirror that here. */
   async startTimer(target: { taskId?: string | null; projectId?: string | null }) {
     const taskId = target.taskId ?? null
@@ -178,16 +223,22 @@ export const actions = {
       const { entry } = await api<{ entry: ApiEntry }>('/time-entries/start', { method: 'POST', body: { taskId, projectId } })
       const now = Date.now()
       set({ entries: [...state.entries.map((e) => (e.endedAt === null ? { ...e, endedAt: now } : e)), toEntry(entry)], error: '' })
+      mutationHook?.()
     } catch (e) {
       set({ error: message(e) })
     }
   },
 
-  async stopTimer() {
+  /** Stops the running timer now, or at `at` (ms), for example the moment the person went idle. */
+  async stopTimer(at?: number) {
     try {
-      const { entry } = await api<{ entry: ApiEntry }>('/time-entries/stop', { method: 'POST' })
+      const { entry } = await api<{ entry: ApiEntry }>('/time-entries/stop', {
+        method: 'POST',
+        body: at === undefined ? undefined : { endedAt: new Date(at).toISOString() },
+      })
       const done = toEntry(entry)
       set({ entries: state.entries.map((e) => (e.id === done.id ? done : e)), error: '' })
+      mutationHook?.()
     } catch (e) {
       await loadStore()
       set({ error: message(e) })
