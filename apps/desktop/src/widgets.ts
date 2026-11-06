@@ -19,29 +19,36 @@ export const WIDGET_MARGIN = 16
 
 const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), Math.max(min, max))
 
+/** The bottom-right corner of a window. Remembering this (not the top-left) lets every style grow and shrink around the same corner. */
+export interface Anchor {
+  right: number
+  bottom: number
+}
+export const anchorOf = (r: Rect): Anchor => ({ right: r.x + r.width, bottom: r.y + r.height })
+
 /**
- * Where the floating window goes. The bottom bar spans the bottom of the screen. The other styles keep the position
- * the person dragged them to (kept inside the screen), or start in the bottom-right corner.
+ * Where the floating window goes. The bottom bar spans the bottom of the screen. The other styles hang from the corner
+ * the person last dragged them to (kept inside the screen), or start in the bottom-right corner of the screen.
  */
-export function widgetBounds(mode: WidgetMode, workArea: Rect, saved?: { x: number; y: number } | null): Rect {
+export function widgetBounds(mode: WidgetMode, workArea: Rect, anchor?: Anchor | null): Rect {
   if (mode === 'dock') {
     const h = WIDGET_SIZES.dock.height
     return { x: workArea.x, y: workArea.y + workArea.height - h, width: workArea.width, height: h }
   }
   const { width, height } = WIDGET_SIZES[mode]
-  const x = saved ? saved.x : workArea.x + workArea.width - width - WIDGET_MARGIN
-  const y = saved ? saved.y : workArea.y + workArea.height - height - WIDGET_MARGIN
+  const right = anchor ? anchor.right : workArea.x + workArea.width - WIDGET_MARGIN
+  const bottom = anchor ? anchor.bottom : workArea.y + workArea.height - WIDGET_MARGIN
   return {
-    x: clamp(x, workArea.x, workArea.x + workArea.width - width),
-    y: clamp(y, workArea.y, workArea.y + workArea.height - height),
+    x: clamp(right - width, workArea.x, workArea.x + workArea.width - width),
+    y: clamp(bottom - height, workArea.y, workArea.y + workArea.height - height),
     width,
     height,
   }
 }
 
-/** Is the saved position still on a screen that exists? (A monitor may have been unplugged.) */
-export function insideAnyScreen(pos: { x: number; y: number }, areas: Rect[]): boolean {
-  return areas.some((a) => pos.x >= a.x - 20 && pos.x < a.x + a.width - 20 && pos.y >= a.y - 20 && pos.y < a.y + a.height - 20)
+/** Is a saved corner still on a screen that exists? (A monitor may have been unplugged.) */
+export function anchorOnScreen(anchor: Anchor, areas: Rect[]): boolean {
+  return areas.some((r) => anchor.right > r.x + 20 && anchor.right <= r.x + r.width + 20 && anchor.bottom > r.y + 20 && anchor.bottom <= r.y + r.height + 20)
 }
 
 export function shouldShowWidget(s: {

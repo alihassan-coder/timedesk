@@ -1,10 +1,11 @@
 // End-to-end test of the floating timer in the real desktop app (Electron).
 // Needs: web on WEB_URL and a FRESH in-memory API on API_URL (pnpm --filter @timedesk/api dev:memory).
 //   node e2e/widget-flow.mjs [screenshot-folder]
-import { spawn } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { closeSync, mkdtempSync, openSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import electron from 'electron'
 
 const WEB = process.env.WEB_URL ?? 'http://localhost:5173'
@@ -23,7 +24,7 @@ const userData = mkdtempSync(join(tmpdir(), 'td-widget-'))
 const app = spawn(electron, ['.', `--web-url=${WEB}`, `--remote-debugging-port=${PORT}`], {
   cwd: new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
   env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, TIMEDESK_USER_DATA: userData, TIMEDESK_IDLE_LIMIT_SECONDS: '999999' },
-  stdio: 'ignore',
+  stdio: process.env.DESKTOP_LOG ? ['ignore', openSync(process.env.DESKTOP_LOG, 'w'), openSync(process.env.DESKTOP_LOG + '.err', 'w')] : 'ignore',
 })
 
 async function connect(match, ms = 20000) {
@@ -113,6 +114,38 @@ try {
     w.ws.close()
   })
 
+  if (process.platform === 'win32') {
+    await step('the floating timer is really on screen: visible, always on top, inside the work area (asked of Windows, no screenshots)', async () => {
+      await sleep(1500)
+      const out = execFileSync('powershell', ['-NoProfile', '-File', fileURLToPath(new URL('./list-windows.ps1', import.meta.url)), '-ProcessId', String(app.pid)]).toString()
+      const { work, windows } = JSON.parse(out)
+      const small = windows.filter((w) => w.w <= 360 && w.h <= 360 && w.visible)
+      if (small.length === 0) throw new Error('no small visible window: ' + JSON.stringify(windows))
+      const w = small[0]
+      if (!w.topmost) throw new Error('not always-on-top: ' + JSON.stringify(w))
+      if (w.minimized) throw new Error('minimized')
+      if (w.x < work.x - 5 || w.y < work.y - 5 || w.x + w.w > work.x + work.w + 5 || w.y + w.h > work.y + work.h + 5) throw new Error('outside the screen: ' + JSON.stringify({ w, work }))
+    })
+  }
+
+  if (process.platform === 'linux') {
+    await step('Linux: the floating timer is shown, above other windows, and kept out of the taskbar (asked of the window manager)', async () => {
+      await sleep(1500)
+      const rows = execFileSync('wmctrl', ['-lGp']).toString().split('\n').filter(Boolean).map((l) => {
+        const p = l.trim().split(/\s+/)
+        return { id: p[0], pid: Number(p[2]), x: Number(p[3]), y: Number(p[4]), w: Number(p[5]), h: Number(p[6]), title: p.slice(8).join(' ') }
+      })
+      const mine = rows.filter((r) => r.pid === app.pid)
+      const small = mine.filter((r) => r.w <= 360 && r.h <= 360)
+      if (small.length === 0) throw new Error('no small window found. Windows of the app: ' + JSON.stringify(mine) + ' all: ' + JSON.stringify(rows))
+      const w = small[0]
+      const state = execFileSync('xprop', ['-id', w.id, '_NET_WM_STATE']).toString()
+      if (!state.includes('_NET_WM_STATE_ABOVE')) throw new Error('not above other windows: ' + state.trim())
+      if (!state.includes('_NET_WM_STATE_SKIP_TASKBAR')) throw new Error('would show in the taskbar: ' + state.trim())
+      if (w.x < 0 || w.y < 0 || w.x + w.w > 1920 || w.y + w.h > 1080) throw new Error('outside the screen: ' + JSON.stringify(w))
+    })
+  }
+
   for (const [mode, label] of [['compact', 'Compact'], ['expanded', 'Expanded'], ['dock', 'Bottom bar'], ['pomodoro', 'Pomodoro']]) {
     await step(`style "${label}" resizes the window and renders`, async () => {
       await main.ev(`window.timedesk.setSettings({ widgetMode: ${JSON.stringify(mode)} })`)
@@ -181,6 +214,13 @@ try {
     const s = await main.ev(`window.timedesk.setSettings({ widgetMode: 'giant', idleMinutes: 'soon', widget: 'sometimes' })`)
     if (s.widgetMode !== 'compact' || s.idleMinutes !== 5 || s.widget !== 'never') throw new Error('accepted bad values: ' + JSON.stringify(s))
   })
+  if (process.env.STRICT_SHORTCUTS && process.env.DESKTOP_LOG) {
+    await step('the global shortcuts (Ctrl+Alt+T, Ctrl+Alt+N) registered without a conflict', async () => {
+      const { readFileSync } = await import('node:fs')
+      const log = readFileSync(process.env.DESKTOP_LOG, 'utf8')
+      if (/shortcut .* is taken or not allowed/.test(log) || /shortcut .*: /.test(log.replace(/floating timer[^\n]*/g, ''))) throw new Error('a shortcut did not register: ' + log.split('\n').filter((l) => /shortcut/.test(l)).join(' | '))
+    })
+  }
 } catch (e) {
   results.push('ERROR ' + e.message)
 } finally {

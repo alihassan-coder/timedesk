@@ -1,0 +1,75 @@
+name: Desktop on Linux
+
+# Runs the real desktop app on a real Linux (Ubuntu) with a virtual screen and a window manager, and checks the floating
+# timer, its four styles, stop/resume between windows, and that the window manager really shows it above other windows.
+# It cannot cover every desktop (GNOME, KDE, Wayland), but it catches a broken Linux build before a release.
+
+on:
+  push:
+    branches: [main, linux-e2e]
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/web/**'
+      - 'packages/**'
+      - '.github/workflows/desktop-linux-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  widget:
+    name: Floating timer on Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: System packages (virtual screen, window manager, tools to inspect windows, Electron libraries)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb openbox wmctrl x11-utils xdotool \
+            libnss3 libxss1 libgbm1 libxtst6 libnotify4 libsecret-1-0 libgtk-3-0t64 libasound2t64
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the desktop app
+        working-directory: apps/desktop
+        run: node scripts/build.mjs
+        env:
+          TIMEDESK_API_URL: http://localhost:3001
+
+      - name: Start a throwaway API (in-memory database) and the web interface
+        run: |
+          pnpm --filter @timedesk/api dev:memory > api.log 2>&1 &
+          pnpm --filter @timedesk/web exec vite --port 5173 > web.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -s localhost:3001/__memory >/dev/null && curl -s -o /dev/null localhost:5173 && break
+            sleep 1
+          done
+          curl -s localhost:3001/__memory
+
+      - name: Run the floating timer test on a virtual Linux screen
+        working-directory: apps/desktop
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1' # CI containers cannot use Chromium's setuid sandbox
+          DESKTOP_LOG: ${{ runner.temp }}/electron.log
+          STRICT_SHORTCUTS: '1'
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1080x24" bash -c '
+            openbox > /dev/null 2>&1 &
+            sleep 2
+            node e2e/widget-flow.mjs
+          '
+
+      - name: What the app logged (if the test failed)
+        if: failure()
+        run: |
+          echo "--- electron.log"; cat "${{ runner.temp }}/electron.log" 2>/dev/null | head -60
+          echo "--- electron.log.err"; cat "${{ runner.temp }}/electron.log.err" 2>/dev/null | head -40
+          echo "--- api.log"; tail -20 api.log

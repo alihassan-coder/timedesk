@@ -10,7 +10,7 @@ import { APP_ORIGIN, contentSecurityPolicy, isInternalUrl, isSafeExternalUrl, re
 import { createTracker, type ActivitySample, type ForegroundWindow } from './tracker.ts'
 import { createTray } from './tray.ts'
 import { setupUpdater } from './updater.ts'
-import { createIdleWatcher, describeAway, insideAnyScreen, sanitizeDesktopSettings, shouldShowWidget, widgetBounds, windowTitle, type Rect } from './widgets.ts'
+import { anchorOf, anchorOnScreen, createIdleWatcher, describeAway, sanitizeDesktopSettings, shouldShowWidget, widgetBounds, windowTitle, type Rect } from './widgets.ts'
 import { sanitizeBounds, type Bounds } from './window-state.ts'
 
 // Running from source gets its own ID, so Windows never mixes it up with (or reuses a stale icon from) an installed copy.
@@ -233,8 +233,8 @@ function smallWindow(path: string, size: { width: number; height: number }): Bro
     webPreferences: { preload: asset('preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
   })
   try {
-    w.setAlwaysOnTop(true, 'floating')
-    w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    // Workspaces are a Linux and macOS idea. On Windows this call can drop the always-on-top flag, so it is skipped there.
+    if (process.platform !== 'win32') w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   } catch {
     // not supported on every desktop
   }
@@ -252,17 +252,34 @@ function smallWindow(path: string, size: { width: number; height: number }): Bro
   return w
 }
 
+/** Keeps a small window above every other window. Applied each time it is shown, because showing can reset it. */
+function pinOnTop(w: BrowserWindow) {
+  try {
+    for (const level of ['floating', 'pop-up-menu', 'screen-saver'] as const) {
+      w.setAlwaysOnTop(true, level)
+      if (w.isAlwaysOnTop()) break
+    }
+    w.moveTop()
+    if (!w.isAlwaysOnTop()) log('the window did not accept always-on-top')
+  } catch (e) {
+    log(`could not keep the window on top: ${(e as Error).message}`)
+  }
+}
+
 function mainIsInFront() {
   return !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused()
 }
 
 function placeWidget() {
   if (!widgetWin) return
-  const saved = readJson<{ x: number; y: number }>(widgetFile)
   const areas: Rect[] = screen.getAllDisplays().map((d) => d.workArea)
-  const pos = saved && insideAnyScreen(saved, areas) ? saved : null
-  const display = pos ? screen.getDisplayNearestPoint(pos) : screen.getPrimaryDisplay()
-  widgetWin.setBounds(widgetBounds(settings.widgetMode, display.workArea, pos))
+  // The style changes around the window's bottom-right corner. If it is hidden or in the bottom bar, use where it was last dragged to.
+  const shown = widgetWin.isVisible() && placedMode !== null && placedMode !== 'dock'
+  const saved = readJson<{ right: number; bottom: number }>(widgetFile)
+  const start = shown ? anchorOf(widgetWin.getBounds()) : saved && typeof saved.right === 'number' && typeof saved.bottom === 'number' ? saved : null
+  const anchor = start && anchorOnScreen(start, areas) ? start : null
+  const display = anchor ? screen.getDisplayNearestPoint({ x: anchor.right - 1, y: anchor.bottom - 1 }) : screen.getPrimaryDisplay()
+  widgetWin.setBounds(widgetBounds(settings.widgetMode, display.workArea, anchor))
   placedMode = settings.widgetMode
 }
 
@@ -275,8 +292,7 @@ function ensureWidget(): BrowserWindow {
     saveWidgetPos = setTimeout(() => {
       // Remember where it was dragged. The bottom bar always sits at the bottom, so it does not count.
       if (!widgetWin || widgetWin.isDestroyed() || settings.widgetMode === 'dock') return
-      const [x, y] = widgetWin.getPosition()
-      writeJson(widgetFile, { x, y })
+      writeJson(widgetFile, anchorOf(widgetWin.getBounds()))
     }, 400)
   })
   widgetWin.on('closed', () => {
@@ -294,6 +310,8 @@ function syncWidget() {
     const w = ensureWidget()
     if (placedMode !== settings.widgetMode || !w.isVisible()) placeWidget()
     if (!w.isVisible()) w.showInactive() // never steal the keyboard from what the person is doing
+    pinOnTop(w)
+    log(`floating timer: ${settings.widgetMode} bounds=${JSON.stringify(w.getBounds())} visible=${w.isVisible()} onTop=${w.isAlwaysOnTop()}`)
   } else if (widgetWin && !widgetWin.isDestroyed() && widgetWin.isVisible()) {
     widgetWin.hide()
   }
@@ -315,6 +333,7 @@ function showQuickAdd() {
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
   quickWin.setBounds({ x: Math.round(area.x + (area.width - QUICK_SIZE.width) / 2), y: Math.round(area.y + area.height * 0.28), ...QUICK_SIZE })
   quickWin.show()
+  pinOnTop(quickWin)
   quickWin.focus()
   const w = quickWin
   const announce = () => w.webContents.send(IPC.quickAddShown)
@@ -439,7 +458,6 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
     writeJson(userFile('settings.json'), settings)
     applyAutoStart()
     syncTracking()
-    if (settings.widgetMode !== before.widgetMode) placedMode = null // resize and move the floating timer for the new style
     if (settings.widget !== before.widget) widgetDismissed = false
     if (settings.shortcuts !== before.shortcuts) applyShortcuts()
     syncWidget()

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_DESKTOP_SETTINGS } from '@timedesk/shared'
-import { WIDGET_SIZES, createIdleWatcher, describeAway, insideAnyScreen, sanitizeDesktopSettings, shouldShowWidget, widgetBounds, windowTitle } from '../src/widgets.ts'
+import { WIDGET_SIZES, anchorOf, anchorOnScreen, createIdleWatcher, describeAway, sanitizeDesktopSettings, shouldShowWidget, widgetBounds, windowTitle } from '../src/widgets.ts'
 
 const screen1 = { x: 0, y: 0, width: 1920, height: 1040 } // work area: the taskbar is not included
 
@@ -9,12 +9,17 @@ describe('floating timer position', () => {
     const b = widgetBounds('compact', screen1)
     expect(b).toEqual({ x: 1920 - WIDGET_SIZES.compact.width - 16, y: 1040 - WIDGET_SIZES.compact.height - 16, ...WIDGET_SIZES.compact })
   })
-  it('keeps where the person dragged it, but always on screen', () => {
-    expect(widgetBounds('expanded', screen1, { x: 100, y: 200 })).toMatchObject({ x: 100, y: 200 })
-    expect(widgetBounds('expanded', screen1, { x: 5000, y: -300 })).toMatchObject({ x: 1920 - WIDGET_SIZES.expanded.width, y: 0 })
+  it('hangs from the corner the person dragged it to, but always on screen', () => {
+    expect(widgetBounds('expanded', screen1, { right: 700, bottom: 500 })).toMatchObject({ x: 700 - WIDGET_SIZES.expanded.width, y: 500 - WIDGET_SIZES.expanded.height })
+    expect(widgetBounds('expanded', screen1, { right: 5000, bottom: -300 })).toMatchObject({ x: 1920 - WIDGET_SIZES.expanded.width, y: 0 })
+  })
+  it('every style grows and shrinks around the same bottom-right corner', () => {
+    const corner = anchorOf(widgetBounds('compact', screen1, { right: 1000, bottom: 600 }))
+    for (const m of ['expanded', 'pomodoro'] as const) expect(anchorOf(widgetBounds(m, screen1, corner))).toEqual(corner)
+    expect(anchorOf(widgetBounds('compact', screen1, anchorOf(widgetBounds('expanded', screen1, corner))))).toEqual(corner)
   })
   it('the bottom bar spans the whole bottom edge', () => {
-    expect(widgetBounds('dock', screen1, { x: 300, y: 300 })).toEqual({ x: 0, y: 1040 - WIDGET_SIZES.dock.height, width: 1920, height: WIDGET_SIZES.dock.height })
+    expect(widgetBounds('dock', screen1, { right: 700, bottom: 500 })).toEqual({ x: 0, y: 1040 - WIDGET_SIZES.dock.height, width: 1920, height: WIDGET_SIZES.dock.height })
   })
   it('every style fits a small 1366x728 screen', () => {
     const small = { x: 0, y: 0, width: 1366, height: 728 }
@@ -26,9 +31,10 @@ describe('floating timer position', () => {
       expect(b.y + b.height).toBeLessThanOrEqual(728)
     }
   })
-  it('notices a saved position on a monitor that is gone', () => {
-    expect(insideAnyScreen({ x: 2500, y: 100 }, [screen1])).toBe(false)
-    expect(insideAnyScreen({ x: 2500, y: 100 }, [screen1, { x: 1920, y: 0, width: 1920, height: 1080 }])).toBe(true)
+  it('notices a saved corner on a monitor that is gone', () => {
+    expect(anchorOnScreen({ right: 2500, bottom: 300 }, [screen1])).toBe(false)
+    expect(anchorOnScreen({ right: 2500, bottom: 300 }, [screen1, { x: 1920, y: 0, width: 1920, height: 1080 }])).toBe(true)
+    expect(anchorOnScreen({ right: 1900, bottom: 1000 }, [screen1])).toBe(true)
   })
 })
 
