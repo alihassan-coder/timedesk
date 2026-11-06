@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { CalendarRange, NotebookPen, Sparkles, Sunrise } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, XAxis } from 'recharts'
 import { dailyTotals, dueBucket, formatHours, overlapMs, periodStart } from '@timedesk/shared'
 import { PageHeader } from '@/components/page-header'
@@ -8,6 +9,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } f
 import { useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
 import { TaskRow } from '@/features/task-row'
+import { askTempoLink, TEMPO_PROMPTS } from '@/features/assistant/tempo-prompts'
 import { useProfile } from '@/lib/auth-client'
 import { projectColor } from '@/lib/project-colors'
 
@@ -112,6 +114,8 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {!isNew && <TempoCard now={now} />}
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -187,5 +191,51 @@ export default function Dashboard() {
         </CardContent>
       </Card>
     </>
+  )
+}
+
+/**
+ * Tempo's three briefings, one click each. The one that fits the moment is highlighted: plan in the morning,
+ * summary in the evening, weekly review at the end of the week.
+ */
+function TempoCard({ now }: { now: number }) {
+  const d = new Date(now)
+  const weekEnd = d.getDay() === 5 || d.getDay() === 6 || d.getDay() === 0
+  const suggested = weekEnd && d.getHours() >= 14 ? 'week' : d.getHours() < 13 ? 'plan' : 'day'
+  const items = [
+    { id: 'plan', prompt: TEMPO_PROMPTS.plan, icon: Sunrise, text: 'Your most important tasks, fitted around your calendar.' },
+    { id: 'day', prompt: TEMPO_PROMPTS.day, icon: NotebookPen, text: 'What you tracked and finished today, and what is left.' },
+    { id: 'week', prompt: TEMPO_PROMPTS.week, icon: CalendarRange, text: 'Your week compared with the last one, wins and what to change.' },
+  ] as const
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Sparkles className="size-4" /> Ask Tempo
+        </CardTitle>
+        <CardDescription>Briefings written from your own tracked time, tasks and calendar.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 sm:grid-cols-3">
+        {items.map((i) => (
+          <Link
+            key={i.id}
+            to={askTempoLink(i.prompt)}
+            className={
+              'hover:bg-accent focus-visible:ring-ring flex gap-3 rounded-lg border p-3 transition-colors outline-none focus-visible:ring-2 ' +
+              (suggested === i.id ? 'border-primary/50 bg-primary/5' : '')
+            }
+          >
+            <i.icon className="text-primary mt-0.5 size-5 shrink-0" />
+            <span className="min-w-0">
+              <span className="flex items-center gap-2 text-sm font-medium">
+                {i.prompt}
+                {suggested === i.id && <span className="bg-primary text-primary-foreground rounded px-1.5 py-0.5 text-[10px] font-medium">Now</span>}
+              </span>
+              <span className="text-muted-foreground mt-0.5 block text-xs">{i.text}</span>
+            </span>
+          </Link>
+        ))}
+      </CardContent>
+    </Card>
   )
 }

@@ -9,6 +9,13 @@ export function createRoutes(c: Controllers) {
 
   r.get('/me', c.me)
 
+  r.get('/account/export', c.account.export)
+  r.delete('/account', c.account.remove)
+
+  r.get('/reviews', c.reviews.recent)
+  r.get('/reviews/:week', c.reviews.get)
+  r.put('/reviews/:week', c.reviews.save)
+
   const admin = new Hono<AppEnv>()
   admin.use('*', requireAdmin)
   admin.get('/users', c.admin.listUsers)

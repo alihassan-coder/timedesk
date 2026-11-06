@@ -6,9 +6,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { authClient } from '@/lib/auth-client'
+import { getLoginNotice, setLoginNotice } from '@/lib/account'
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  /** A one-time message, for example after the account was deleted. */
+  const notice = getLoginNotice()
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -16,6 +19,7 @@ export default function LoginPage() {
 
   async function submit(e: FormEvent) {
     e.preventDefault()
+    setLoginNotice('')
     setError('')
     setBusy(true)
     const id = login.trim()
@@ -45,6 +49,11 @@ export default function LoginPage() {
       }
     >
       <form onSubmit={submit} className="space-y-4">
+        {notice && !error && (
+          <p role="status" className="bg-muted rounded-md border px-3 py-2 text-sm">
+            {notice}
+          </p>
+        )}
         <FormError message={error} />
         <div className="space-y-2">
           <Label htmlFor="login">Username or email</Label>

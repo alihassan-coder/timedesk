@@ -23,7 +23,7 @@ export function createTaskService(db: Db, hooks?: TaskHooks) {
     async create(user: SessionUser, input: CreateTask) {
       const [row] = await db
         .insert(t)
-        .values({ ...input, id: input.id ?? crypto.randomUUID(), userId: user.id, workspaceId: user.id })
+        .values({ ...input, id: input.id ?? crypto.randomUUID(), userId: user.id, workspaceId: user.id, completedAt: input.status === 'done' ? new Date() : null })
         .returning()
       await hooks?.changed(user.id, row)
       return row
@@ -33,7 +33,14 @@ export function createTaskService(db: Db, hooks?: TaskHooks) {
     async update(userId: string, id: string, patch: UpdateTask) {
       const [before] = await db.select().from(t).where(owned(userId, id))
       if (!before) throw notFound('Task')
-      const [row] = await db.update(t).set({ ...patch, updatedAt: new Date() }).where(owned(userId, id)).returning()
+      const now = new Date()
+      // Remember when it was finished (for summaries and reviews); reopening it forgets that.
+      const completedAt = patch.status === undefined ? undefined : patch.status === 'done' ? (before.status === 'done' ? before.completedAt : now) : null
+      const [row] = await db
+        .update(t)
+        .set({ ...patch, ...(completedAt !== undefined ? { completedAt } : {}), updatedAt: now })
+        .where(owned(userId, id))
+        .returning()
 
       await hooks?.changed(userId, row)
 

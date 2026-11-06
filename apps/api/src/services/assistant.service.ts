@@ -1,6 +1,21 @@
 import { convertToModelMessages, createUIMessageStreamResponse, isStepCount, streamText, toUIMessageStream, tool, type UIMessage } from 'ai'
 import { z } from 'zod'
-import { addDays, dailyTotals, dueBucket, formatHours, overlapMs, periodStart, toDateKey } from '@timedesk/shared'
+import {
+  addDays,
+  buildDigest,
+  dailyTotals,
+  dueBucketOn,
+  formatHours,
+  overlapMs,
+  periodStart,
+  planCandidates,
+  startOfWeek,
+  toDateKey,
+  zonedDateKey,
+  zonedDays,
+  zonedHour,
+  type DigestTask,
+} from '@timedesk/shared'
 import type { ModelFactory } from '../lib/models.ts'
 import { listModels, PROVIDER_NAMES } from '../lib/models.ts'
 import type { MemoryProvider } from '../lib/memory.ts'
@@ -8,9 +23,12 @@ import type { SessionUser } from '../types.ts'
 import { AppError, badRequest } from '../utils/errors.ts'
 import type { AiProvider } from '../validators/index.ts'
 import { aiProviders } from '../validators/index.ts'
+import type { ActivityService } from './activity.service.ts'
 import type { AiKeyService } from './ai-key.service.ts'
 import type { GoogleCalendarService } from './google-calendar.service.ts'
 import type { ProjectService } from './project.service.ts'
+import type { ReviewService } from './review.service.ts'
+import type { SettingsService } from './settings.service.ts'
 import type { TaskService } from './task.service.ts'
 import type { TimeService } from './time.service.ts'
 
@@ -21,10 +39,18 @@ interface Parts {
   time: TimeService
   /** Google Calendar. When the person has connected it, Tempo gets calendar tools. */
   calendar?: GoogleCalendarService
+  /** Weekly reflections, daily goal and app usage feed the summaries. Optional so small tests can leave them out. */
+  reviews?: ReviewService
+  settings?: SettingsService
+  activity?: ActivityService
   models: ModelFactory
   memory: MemoryProvider
   now?: () => Date
 }
+
+/** The time zone this server runs in: the fallback when the app did not say which zone the person is in. */
+const SERVER_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
+const DEFAULT_GOAL_MINUTES = 360
 
 const dateKey = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Date as YYYY-MM-DD in the user's local time")
 
@@ -135,7 +161,9 @@ function calendarTools(user: SessionUser, calendar: GoogleCalendarService) {
 export function createAssistantService(p: Parts) {
   const now = () => (p.now ?? (() => new Date()))()
 
-  function buildTools(user: SessionUser, calendarOn = false) {
+  function buildTools(user: SessionUser, calendarOn = false, timeZone = SERVER_ZONE) {
+    /** The person's today, in their own time zone. */
+    const today = () => zonedDateKey(now().getTime(), timeZone)
     const findProjectId = async (ref?: string | null) => {
       if (!ref) return null
       const r = ref.trim().toLowerCase()
@@ -154,12 +182,165 @@ export function createAssistantService(p: Parts) {
       status: t.status,
       priority: t.priority,
       due: t.due,
-      bucket: dueBucket(t.due, now().getTime()),
+      bucket: dueBucketOn(t.due, today()),
       project: await projectName(t.projectId),
       repeats: t.recurrence?.freq ?? null,
     })
 
+    // ---- Shared by the daily summary, the weekly review and "plan my day" ----
+    const digestTasks = (rows: Awaited<ReturnType<TaskService['list']>>): DigestTask[] =>
+      rows.map((t) => ({
+        id: t.id,
+        title: t.title,
+        projectId: t.projectId,
+        status: t.status as DigestTask['status'],
+        priority: t.priority as DigestTask['priority'],
+        due: t.due,
+        completedAt: t.completedAt?.getTime() ?? null,
+      }))
+    const entriesOf = (rows: Awaited<ReturnType<TimeService['list']>>) =>
+      rows.map((r) => ({ id: r.id, taskId: r.taskId, projectId: r.projectId, startedAt: r.startedAt.getTime(), endedAt: r.endedAt?.getTime() ?? null }))
+    const goalMinutes = async () => {
+      const timer = (await p.settings?.get(user.id))?.data.timer as { dailyGoalMinutes?: unknown } | undefined
+      const g = Number(timer?.dailyGoalMinutes)
+      return Number.isFinite(g) && g >= 0 ? g : DEFAULT_GOAL_MINUTES
+    }
+    /** App names and totals only. Window titles stay out of what is sent to the AI provider. */
+    const topApps = async (from: number, to: number) => {
+      if (!p.activity) return []
+      const s = await p.activity.summary(user.id, { from: new Date(from), to: new Date(to) })
+      return s.byApp.slice(0, 5).map((a) => ({ app: a.app, time: formatHours(a.seconds * 1000) }))
+    }
+    /** Loads what a digest needs. Entries are read from a week before the range, so timers that cross midnight count. */
+    const loadRange = async (from: number, to: number) => {
+      const [projects, taskRows, entryRows] = await Promise.all([
+        p.projects.list(user.id),
+        p.tasks.list(user.id),
+        p.time.list(user.id, { from: new Date(from - 7 * 86_400_000), to: new Date(to) }),
+      ])
+      return { projects, tasks: digestTasks(taskRows), entries: entriesOf(entryRows) }
+    }
+    const projectsBrief = (rows: { name: string; ms: number }[]) => rows.map((r) => ({ project: r.name, time: formatHours(r.ms) }))
+    const openTitles = (tasks: DigestTask[], buckets: string[], day: string) =>
+      tasks.filter((t) => t.status !== 'done' && buckets.includes(dueBucketOn(t.due, day))).map((t) => t.title)
+    const runningNow = async () => {
+      const e = await p.time.running(user.id)
+      if (!e) return null
+      const task = e.taskId ? (await p.tasks.list(user.id)).find((t) => t.id === e.taskId) : undefined
+      return { task: task?.title ?? null, project: await projectName(e.projectId), for: formatHours(now().getTime() - e.startedAt.getTime()) }
+    }
+
     return {
+      daily_summary: tool({
+        description:
+          'Facts for a summary of one day: time tracked (total, by project, compared with the day before), tasks finished, what is still due, the daily goal, and the apps used most. Use it for "summarize my day", "how did today go" or "what did I do yesterday".',
+        inputSchema: z.object({ date: dateKey.optional().describe('The day. Defaults to today') }),
+        execute: async ({ date }) => {
+          const day = date ?? today()
+          const [d] = zonedDays(day, day, timeZone)
+          const [prev] = zonedDays(addDays(day, -1), addDays(day, -1), timeZone)
+          const data = await loadRange(prev.start, d.end)
+          const g = buildDigest({ days: [d], previousDays: [prev], ...data, now: now().getTime() })
+          const goal = await goalMinutes()
+          const isToday = day === today()
+          return {
+            date: day,
+            isToday,
+            tracked: formatHours(g.totalMs),
+            dayBefore: formatHours(g.previousTotalMs ?? 0),
+            byProject: projectsBrief(g.byProject),
+            timerSessions: g.sessions,
+            longestSession: formatHours(g.longestSessionMs),
+            dailyGoal: goal > 0 ? { goal: formatHours(goal * 60_000), reached: g.totalMs >= goal * 60_000 } : 'off',
+            finished: g.completed.map((t) => t.title),
+            stillDueToday: openTitles(data.tasks, ['today'], day),
+            overdue: openTitles(data.tasks, ['overdue'], day),
+            dueTomorrow: openTitles(data.tasks, ['today'], addDays(day, 1)),
+            topApps: await topApps(d.start, d.end),
+            ...(isToday ? { timerRunning: await runningNow() } : {}),
+          }
+        },
+      }),
+
+      weekly_review: tool({
+        description:
+          'Facts for a weekly review (Monday to Sunday): time per day and per project, compared with the week before, best day, days the goal was met, tasks finished, what carries over, the apps used most, and the reflection the user wrote for that week and their plan from the week before. Use it for "weekly review", "how was my week".',
+        inputSchema: z.object({ weekOf: dateKey.optional().describe('Any day in the week. Defaults to this week') }),
+        execute: async ({ weekOf }) => {
+          const monday = startOfWeek(weekOf ?? today())
+          const days = zonedDays(monday, addDays(monday, 6), timeZone)
+          const prev = zonedDays(addDays(monday, -7), addDays(monday, -1), timeZone)
+          const data = await loadRange(prev[0].start, days[6].end)
+          const g = buildDigest({ days, previousDays: prev, ...data, now: now().getTime() })
+          const goal = await goalMinutes()
+          const [review, lastWeek, apps] = await Promise.all([
+            p.reviews?.get(user.id, monday),
+            p.reviews?.get(user.id, addDays(monday, -7)),
+            topApps(days[0].start, days[6].end),
+          ])
+          const change = g.previousTotalMs ? Math.round(((g.totalMs - g.previousTotalMs) / g.previousTotalMs) * 100) : null
+          return {
+            week: { from: g.from, to: g.to, isThisWeek: monday === startOfWeek(today()) },
+            tracked: formatHours(g.totalMs),
+            weekBefore: formatHours(g.previousTotalMs ?? 0),
+            changePercent: change,
+            byDay: g.byDay.map((x) => ({ date: x.date, time: formatHours(x.ms) })),
+            bestDay: g.bestDay ? { date: g.bestDay.date, time: formatHours(g.bestDay.ms) } : null,
+            daysGoalMet: goal > 0 ? g.byDay.filter((x) => x.ms >= goal * 60_000).length : 'goal off',
+            byProject: projectsBrief(g.byProject),
+            finished: g.completed.map((t) => (t.project ? `${t.title} (${t.project})` : t.title)),
+            carryOver: openTitles(data.tasks, ['overdue', 'today'], today()),
+            topApps: apps,
+            reflection: review && (review.wentWell || review.improve) ? { wentWell: review.wentWell, willChange: review.improve } : null,
+            planFromWeekBefore: lastWeek?.improve || null,
+          }
+        },
+      }),
+
+      plan_day: tool({
+        description:
+          'Facts to plan a day: the open tasks that most need attention (in order, with the reason), calendar events that day when Google Calendar is connected, time already tracked, the daily goal and the current time. Use it for "plan my day", "what should I work on". Then propose a short schedule. Do not create calendar events or change tasks unless the user asks.',
+        inputSchema: z.object({ date: dateKey.optional().describe('The day to plan. Defaults to today') }),
+        execute: async ({ date }) => {
+          const day = date ?? today()
+          const [d] = zonedDays(day, day, timeZone)
+          const week = zonedDays(addDays(day, -7), addDays(day, -1), timeZone)
+          const data = await loadRange(week[0].start, d.end)
+          const g = buildDigest({ days: [d], previousDays: week, ...data, now: now().getTime() })
+          const workedDays = buildDigest({ days: week, ...data, now: now().getTime() }).byDay.filter((x) => x.ms > 0)
+          const goal = await goalMinutes()
+          const isToday = day === today()
+
+          let events: { title: string; start: string; end: string; allDay: boolean }[] | string = 'Google Calendar is not connected'
+          if (calendarOn && p.calendar) {
+            try {
+              const list = await p.calendar.listEvents(user.id, { from: new Date(d.start), to: new Date(d.end) })
+              events = list.filter((e) => !e.timedeskTaskId).map((e) => ({ title: e.title, start: e.start, end: e.end, allDay: e.allDay }))
+            } catch (e) {
+              events = e instanceof AppError ? `Could not read the calendar: ${e.message}` : 'Could not read the calendar'
+            }
+          }
+          return {
+            date: day,
+            timeZone,
+            ...(isToday ? { currentTime: `${String(zonedHour(now().getTime(), timeZone)).padStart(2, '0')}:00 (plan from now on)` } : {}),
+            trackedSoFar: formatHours(g.totalMs),
+            dailyGoal: goal > 0 ? formatHours(goal * 60_000) : 'off',
+            leftForGoal: goal > 0 ? formatHours(Math.max(0, goal * 60_000 - g.totalMs)) : null,
+            typicalDay: workedDays.length ? formatHours(workedDays.reduce((s, x) => s + x.ms, 0) / workedDays.length) : 'no history yet',
+            tasks: planCandidates(data.tasks, data.projects, day, 10).map((t) => ({
+              title: t.title,
+              why: t.reason,
+              priority: t.priority,
+              project: t.project,
+              ...(t.status === 'in_progress' ? { started: true } : {}),
+            })),
+            calendar: events,
+            ...(isToday ? { timerRunning: await runningNow() } : {}),
+          }
+        },
+      }),
+
       list_tasks: tool({
         description: 'List tasks. Filter by status, project name, or due category. Call this before changing tasks so you know their exact titles.',
         inputSchema: z.object({
@@ -169,7 +350,7 @@ export function createAssistantService(p: Parts) {
         }),
         execute: async ({ status, project, due }) => {
           const pid = project ? await findProjectId(project) : undefined
-          const rows = (await p.tasks.list(user.id, status)).filter((t) => (pid === undefined || t.projectId === pid) && (!due || dueBucket(t.due, now().getTime()) === due))
+          const rows = (await p.tasks.list(user.id, status)).filter((t) => (pid === undefined || t.projectId === pid) && (!due || dueBucketOn(t.due, today()) === due))
           return { count: rows.length, tasks: await Promise.all(rows.slice(0, 40).map(brief)) }
         },
       }),
@@ -359,11 +540,13 @@ export function createAssistantService(p: Parts) {
     return (m?.parts ?? []).map((part) => (part.type === 'text' ? part.text : '')).join(' ').trim()
   }
 
-  function instructions(user: SessionUser, memories: string[], projects: string[], calendarOn: boolean) {
-    const d = now()
+  function instructions(user: SessionUser, memories: string[], projects: string[], calendarOn: boolean, timeZone: string) {
+    const at = now()
+    const spoken = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(at)
     return [
       `You are Tempo, the assistant inside timedesk, a time tracking and todo app. You are talking to ${user.name}.`,
-      `Today is ${d.toDateString()} (${toDateKey(d.getTime())}). Resolve words like "tomorrow" or "next Friday" to YYYY-MM-DD dates.`,
+      `It is now ${spoken} in the user's time zone (${timeZone}). Today is ${zonedDateKey(at.getTime(), timeZone)}. Resolve words like "tomorrow" or "next Friday" to YYYY-MM-DD dates.`,
+      'For a summary of a day, a weekly review, or planning a day, call daily_summary, weekly_review or plan_day first, and use only the numbers they return. Answer with a few short sections using markdown headings or bold labels and bullet lists: what happened (time and finished tasks), what stands out (one or two honest observations), and what to do next. For a plan, give an ordered list of time blocks starting from the current time, fitted around calendar events, with the most important task first, and offer to put the blocks in the calendar or start a timer.',
       'You can read and change the user\'s tasks, projects and timer with your tools. Look things up with a tool before you change them. Never invent task names.',
       'Only delete something when the user clearly asked. When an action is ambiguous, ask one short question first.',
       'After using tools, say plainly what you did. Keep answers short and concrete.',
@@ -398,7 +581,8 @@ export function createAssistantService(p: Parts) {
     },
 
     /** Streams the assistant's answer. Tools run on the server against this user's data only. */
-    async chat(user: SessionUser, input: { messages: UIMessage[]; provider: AiProvider; model: string }): Promise<Response> {
+    async chat(user: SessionUser, input: { messages: UIMessage[]; provider: AiProvider; model: string; timeZone?: string }): Promise<Response> {
+      const timeZone = input.timeZone ?? SERVER_ZONE
       const keys = await p.aiKeys.allPlain(user.id)
       const apiKey = keys[input.provider]
       if (!apiKey) throw badRequest(`Add your ${PROVIDER_NAMES[input.provider]} API key in Settings first.`)
@@ -412,9 +596,9 @@ export function createAssistantService(p: Parts) {
 
       const result = streamText({
         model: p.models(input.provider, input.model, apiKey),
-        instructions: instructions(user, remembered.map((m) => m.text), projects.map((x) => x.name), calendarOn),
+        instructions: instructions(user, remembered.map((m) => m.text), projects.map((x) => x.name), calendarOn, timeZone),
         messages: await convertToModelMessages(input.messages),
-        tools: buildTools(user, calendarOn),
+        tools: buildTools(user, calendarOn, timeZone),
         stopWhen: isStepCount(8),
         onFinish: async ({ text }) => {
           if (query && text && p.memory.enabled(keys)) {

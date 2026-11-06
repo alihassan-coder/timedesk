@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isValidTimeZone, startOfWeek } from '@timedesk/shared'
 
 const dateKey = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
 const recurrence = z.object({
@@ -65,6 +66,8 @@ export const chatBody = z.object({
   messages: z.array(z.record(z.string(), z.unknown())).min(1).max(200),
   provider: z.enum(aiProviders),
   model: z.string().min(1).max(120),
+  /** The person's IANA time zone, so Tempo knows their today. The server's own zone is used without it. */
+  timeZone: z.string().max(64).refine(isValidTimeZone, 'Unknown time zone.').optional(),
 })
 
 export const saveChat = z.object({
@@ -159,3 +162,20 @@ export const updateCalendarEvent = z
 
 export type CreateCalendarEvent = z.infer<typeof createCalendarEvent>
 export type UpdateCalendarEvent = z.infer<typeof updateCalendarEvent>
+
+// ---- Weekly reviews and the account ----
+const dateKeyRe = /^\d{4}-\d{2}-\d{2}$/
+export const weekParam = z.object({
+  week: z
+    .string()
+    .regex(dateKeyRe, 'Use the Monday of the week as YYYY-MM-DD.')
+    .refine((k) => !Number.isNaN(Date.parse(k)) && startOfWeek(k) === k, 'A week is named by its Monday (YYYY-MM-DD).'),
+})
+export const saveReview = z
+  .object({
+    wentWell: z.string().max(4000).default(''),
+    improve: z.string().max(4000).default(''),
+  })
+  .strict()
+export const reviewsQuery = z.object({ limit: z.coerce.number().int().min(1).max(52).default(12) })
+export const deleteAccount = z.object({ password: z.string().min(1).max(200) }).strict()

@@ -23,6 +23,8 @@ export interface MemoryProvider {
   remember(userId: string, keys: ProviderKeys, turns: Turn[]): Promise<void>
   list(userId: string, keys: ProviderKeys): Promise<MemoryItem[]>
   forget(userId: string, keys: ProviderKeys, id: string): Promise<boolean>
+  /** Removes everything remembered about this user (when the account is deleted). */
+  forgetAll(userId: string, keys: ProviderKeys): Promise<void>
 }
 
 export const noMemory: MemoryProvider = {
@@ -31,6 +33,7 @@ export const noMemory: MemoryProvider = {
   remember: async () => {},
   list: async () => [],
   forget: async () => false,
+  forgetAll: async () => {},
 }
 
 /**
@@ -96,6 +99,11 @@ export function createMem0Memory(databaseUrl: string): MemoryProvider {
       if (!mine) return false
       await m.delete(id)
       return true
+    },
+    async forgetAll(userId, keys) {
+      const m = instance(keys)
+      if (!m) return
+      await m.deleteAll({ userId })
     },
   }
 }

@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+Needs the backend update and database migration `0004_reviews_and_completed` (run `pnpm --filter @timedesk/db db:migrate` before the API goes live).
+
+### Tempo
+- **Plan my day**: Tempo orders your open tasks by what needs attention (overdue, due today, started, high priority), fits them around your Google Calendar events and your daily goal, and proposes time blocks from the current time
+- **Daily summary**: time tracked by project compared with the day before, tasks finished, what is still due, your daily goal and the apps you used most
+- **Weekly review**: the week compared with the one before, best day, days the goal was met, wins, what carries over, and the reflection you wrote, plus your plan from the week before
+- One click from the dashboard (the card highlights the one that fits the time of day), from Ctrl+K, and from the Weekly review page
+- Tempo now knows your own time zone, so "today" and "tomorrow" are right even late at night. Before, it used the server's clock (UTC)
+- The numbers come from exact calculations on your data; the AI only writes them up. Window titles from app tracking are never sent to the AI provider, only app names and totals
+
+### Weekly review
+- Pick any week (Monday to Sunday) with the arrows
+- Fixed: "Wins" listed every task you had ever finished; it now lists only tasks finished in that week (tasks now remember when they were finished)
+- Fixed: "Save review" did not save anything. Your reflection is now stored with your account, per week
+
+### Your data
+- Settings, Account: download everything as JSON (projects, tasks, time, reviews, settings, Tempo chats and memories, app activity; no keys or tokens)
+- Download tracked time as a CSV for Excel or Google Sheets
+- Delete your account and all its data, after typing your username and password
+
+### Other
+- The desktop app card in the sidebar showed version 0.1.0; it now shows the current version
+
 ## 0.3.1
 
 Fixes for the floating timer. The backend is unchanged, so no backend update is needed.

@@ -22,6 +22,9 @@ export function fakeMemory() {
       pools.set(userId, pool.filter((m) => m.id !== id))
       return true
     },
+    forgetAll: async (userId) => {
+      pools.delete(userId)
+    },
   }
 
   return {

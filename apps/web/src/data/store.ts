@@ -51,8 +51,9 @@ export function useStore(): State {
 
 export const getState = () => state
 
-interface ApiTask extends Omit<Task, 'createdAt'> {
+interface ApiTask extends Omit<Task, 'createdAt' | 'completedAt'> {
   createdAt: string
+  completedAt: string | null
 }
 interface ApiEntry {
   id: string
@@ -71,6 +72,14 @@ const toTask = (t: ApiTask): Task => ({
   due: t.due,
   recurrence: t.recurrence,
   createdAt: new Date(t.createdAt).getTime(),
+  completedAt: t.completedAt ? new Date(t.completedAt).getTime() : null,
+})
+
+/** A task with a new status, keeping completedAt in step the way the server does. */
+const withStatus = (t: Task, status: TaskStatus): Task => ({
+  ...t,
+  status,
+  completedAt: status === 'done' ? (t.status === 'done' ? t.completedAt : Date.now()) : null,
 })
 const toEntry = (e: ApiEntry): TimeEntry => ({
   id: e.id,
@@ -152,7 +161,7 @@ export const actions = {
   async addTask(input: NewTask) {
     const title = input.title.trim()
     if (!title) return
-    const task: Task = { id: crypto.randomUUID(), ...input, title, status: 'todo', createdAt: Date.now() }
+    const task: Task = { id: crypto.randomUUID(), ...input, title, status: 'todo', createdAt: Date.now(), completedAt: null }
     set({ tasks: [task, ...state.tasks] })
     await sync(() =>
       api('/tasks', {
@@ -166,7 +175,7 @@ export const actions = {
   async setStatus(taskId: string, status: TaskStatus) {
     const task = state.tasks.find((t) => t.id === taskId)
     if (!task) return
-    set({ tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status } : t)) })
+    set({ tasks: state.tasks.map((t) => (t.id === taskId ? withStatus(t, status) : t)) })
     await sync(() => api(`/tasks/${taskId}`, { method: 'PATCH', body: { status } }))
     // The server schedules the next occurrence of a recurring task, so pick it up.
     if (status === 'done' && task.status !== 'done' && task.recurrence && task.due) await loadStore()
@@ -175,7 +184,7 @@ export const actions = {
   /** Edit any task fields, for example drag a task to another day. */
   async updateTask(taskId: string, patch: Partial<Pick<Task, 'title' | 'due' | 'priority' | 'projectId' | 'status'>>) {
     if (!state.tasks.some((t) => t.id === taskId)) return
-    set({ tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)) })
+    set({ tasks: state.tasks.map((t) => (t.id === taskId ? { ...(patch.status ? withStatus(t, patch.status) : t), ...patch } : t)) })
     await sync(() => api(`/tasks/${taskId}`, { method: 'PATCH', body: patch }))
   },
 

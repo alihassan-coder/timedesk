@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
 import { user } from './auth.ts'
 
 /**
@@ -45,6 +45,8 @@ export const tasks = pgTable(
     /** Local calendar date, YYYY-MM-DD. */
     due: text('due'),
     recurrence: jsonb('recurrence').$type<{ freq: 'daily' | 'weekly' | 'monthly' | 'custom'; every?: number } | null>(),
+    /** When the task was marked done. Cleared when it is reopened. Used for summaries and reviews. */
+    completedAt: timestamp('completed_at', { withTimezone: true }),
     ...stamps,
   },
   (t) => [index('tasks_workspace_idx').on(t.workspaceId), index('tasks_user_status_idx').on(t.userId, t.status)],
@@ -190,4 +192,21 @@ export const googleTaskLinks = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('google_task_links_task').on(t.taskId), uniqueIndex('google_task_links_event').on(t.userId, t.googleEventId)],
+)
+
+/** A weekly reflection: what went well and what to change. One per person per week (the Monday it starts). */
+export const weeklyReviews = pgTable(
+  'weekly_reviews',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** Monday of the week, YYYY-MM-DD. */
+    weekStart: text('week_start').notNull(),
+    wentWell: text('went_well').notNull().default(''),
+    improve: text('improve').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.weekStart] })],
 )

@@ -7,12 +7,13 @@ const usage = {
   outputTokens: { total: 5, text: 5, reasoning: undefined },
 }
 
-type Part = { type: string; text?: string }
+type Part = { type: string; text?: string; toolName?: string; output?: { value?: unknown } }
 type Msg = { role: string; content: Part[] | string }
 
 /**
  * A fake model for local browser tests (MOCK_AI=1). No network, no key needed.
- * "add a task: X" makes it call create_task, then it confirms in plain text. Anything else is echoed.
+ * "add a task: X" makes it call create_task, then it confirms in plain text. "Plan my day", "Summarize my day" and
+ * "Weekly review" call Tempo's briefing tools and repeat one fact from the result. Anything else is echoed.
  */
 export const mockModelFactory: ModelFactory = () =>
   new MockLanguageModelV4({
@@ -24,14 +25,31 @@ export const mockModelFactory: ModelFactory = () =>
         .find((m) => m.role === 'user')
       const text = Array.isArray(userText?.content) ? userText.content.map((p) => p.text ?? '').join(' ') : String(userText?.content ?? '')
 
+      const briefing = /plan my day/i.test(text) ? 'plan_day' : /summari[sz]e my day/i.test(text) ? 'daily_summary' : /weekly review/i.test(text) ? 'weekly_review' : null
+      const result = Array.isArray(last.content) ? last.content.find((p) => p.type === 'tool-result') : undefined
+      const value = (result?.output?.value ?? {}) as { tracked?: string; tasks?: { title: string }[] }
+      const reply =
+        result?.toolName === 'plan_day'
+          ? `Your plan. First: ${value.tasks?.[0]?.title ?? 'nothing due'}.`
+          : result?.toolName === 'daily_summary'
+            ? `Your day: ${value.tracked} tracked.`
+            : result?.toolName === 'weekly_review'
+              ? `Your week: ${value.tracked} tracked.`
+              : 'Done. I added that to your tasks.'
+
       const chunks =
         last.role === 'tool'
           ? [
               { type: 'text-start', id: 't1' },
-              { type: 'text-delta', id: 't1', delta: 'Done. I added that to your tasks.' },
+              { type: 'text-delta', id: 't1', delta: reply },
               { type: 'text-end', id: 't1' },
               { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, logprobs: undefined, usage },
             ]
+          : briefing
+            ? [
+                { type: 'tool-call', toolCallId: 'mock-1', toolName: briefing, input: '{}' },
+                { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, logprobs: undefined, usage },
+              ]
           : /add a task:\s*(.+)/i.test(text)
             ? [
                 { type: 'tool-call', toolCallId: 'mock-1', toolName: 'create_task', input: JSON.stringify({ title: text.match(/add a task:\s*(.+)/i)![1].trim() }) },

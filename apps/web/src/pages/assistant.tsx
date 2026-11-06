@@ -11,16 +11,22 @@ import { HistoryPanel } from '@/features/assistant/history-panel'
 import { MessageView } from '@/features/assistant/message-view'
 import { MemoryPopover, ToolsPopover } from '@/features/assistant/popovers'
 import { loadStore } from '@/data/store'
+import { TEMPO_PROMPTS, timeZone } from '@/features/assistant/tempo-prompts'
 import { API_URL, authHeaders } from '@/lib/auth-client'
-import { useAi } from '@/lib/ai/server'
+import { refreshAi, useAi } from '@/lib/ai/server'
 import { useAiPrefs } from '@/lib/ai/settings'
 
 const SUGGESTIONS = [
-  'Plan my day around what is due',
+  TEMPO_PROMPTS.plan,
+  TEMPO_PROMPTS.day,
+  TEMPO_PROMPTS.week,
   'Add a task: review pull requests tomorrow, high priority',
   'How much time did I track this week?',
   'Start a timer on my first task',
 ]
+
+/** Prompts already sent automatically, so a re-render (or React's development double run) never sends one twice. */
+const autoSent = new Set<string>()
 
 /** The server answers errors as {"error": "..."}; show just the message. */
 function friendly(err: Error): string {
@@ -35,18 +41,34 @@ function friendly(err: Error): string {
 
 export default function AssistantPage() {
   const { conversations, activeId } = useChats()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const deepLink = params.get('chat')
-  const [draftId, setDraftId] = useState(() => crypto.randomUUID())
+  const ask = params.get('ask')
+  const [draftId, setDraftId] = useState<string>(() => crypto.randomUUID())
   const [historyOpen, setHistoryOpen] = useState(false)
+  /** A question passed in the link (?ask=...), to send in a new chat as soon as the chat is ready. */
+  const [pending, setPending] = useState<{ text: string; chatId: string } | null>(null)
+  const pendingRef = useRef<{ text: string; chatId: string } | null>(null)
+
+  useEffect(() => {
+    if (!ask) return
+    const next = { text: ask.slice(0, 500), chatId: crypto.randomUUID() }
+    pendingRef.current = next
+    setPending(next)
+    setDraftId(next.chatId)
+    chatActions.newChat()
+    setParams({}, { replace: true })
+    // A key may have been added elsewhere since this device last looked; check before deciding there is none.
+    void refreshAi()
+  }, [ask, setParams])
 
   useEffect(() => {
     if (deepLink) chatActions.open(deepLink)
   }, [deepLink])
 
-  // After a chat is deliberately started anew, give it a fresh id.
+  // After a chat is deliberately started anew, give it a fresh id (or the one a pending question is waiting for).
   useEffect(() => {
-    if (activeId === null) setDraftId(crypto.randomUUID())
+    if (activeId === null) setDraftId(pendingRef.current?.chatId ?? crypto.randomUUID())
   }, [activeId])
 
   const active = conversations.find((c) => c.id === activeId)
@@ -79,14 +101,23 @@ export default function AssistantPage() {
         {active && !active.loaded ? (
           <p className="text-muted-foreground flex flex-1 items-center justify-center text-sm">Loading chat...</p>
         ) : (
-          <ChatView key={chatId} chatId={chatId} initial={active?.messages ?? []} />
+          <ChatView
+            key={chatId}
+            chatId={chatId}
+            initial={active?.messages ?? []}
+            autoSend={pending?.chatId === chatId ? pending.text : undefined}
+            onAutoSent={() => {
+              pendingRef.current = null
+              setPending(null)
+            }}
+          />
         )}
       </section>
     </div>
   )
 }
 
-function ChatView({ chatId, initial }: { chatId: string; initial: UIMessage[] }) {
+function ChatView({ chatId, initial, autoSend, onAutoSent }: { chatId: string; initial: UIMessage[]; autoSend?: string; onAutoSent?: () => void }) {
   const ai = useAi()
   const prefs = useAiPrefs()
   const [voiceMode, setVoiceMode] = useState(false)
@@ -128,8 +159,24 @@ function ChatView({ chatId, initial }: { chatId: string; initial: UIMessage[] })
   const send = (text: string) => {
     window.speechSynthesis?.cancel()
     // The model choice travels with each message, so switching models mid-chat just works.
-    void sendMessage({ text }, { body: { provider: ai.current?.provider, model: ai.current?.model } })
+    void sendMessage({ text }, { body: { provider: ai.current?.provider, model: ai.current?.model, timeZone: timeZone() } })
   }
+
+  // Send the question the link brought as soon as a model is available. Without a key it waits, and the banner explains.
+  // It goes out on the next tick and the cleanup cancels it, so a mount React throws away (development double run)
+  // never sends, and the one that stays sends exactly once.
+  useEffect(() => {
+    if (!autoSend || !ai.loaded || !hasKey || !ai.current) return
+    const timer = setTimeout(() => {
+      if (!autoSent.has(chatId)) {
+        autoSent.add(chatId)
+        send(autoSend)
+      }
+      onAutoSent?.()
+    }, 0)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSend, ai.loaded, hasKey, chatId])
 
   const composer = (
     <Composer

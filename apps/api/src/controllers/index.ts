@@ -14,6 +14,27 @@ export function createControllers(s: Services) {
   return {
     me: (c: C) => c.json({ user: c.get('user') }),
 
+    account: {
+      /** Sent as a file download, named with the date. */
+      export: async (c: C) => {
+        const data = await s.account.export(c.get('user').id)
+        c.header('Content-Disposition', `attachment; filename="timedesk-export-${data.exportedAt.slice(0, 10)}.json"`)
+        c.header('Cache-Control', 'no-store')
+        return c.json(data)
+      },
+      remove: async (c: C) => {
+        await s.account.remove(c.get('user').id, c.req.raw.headers, (await parseBody(c, v.deleteAccount)).password)
+        return c.body(null, 204)
+      },
+    },
+
+    reviews: {
+      recent: async (c: C) => c.json({ reviews: await s.reviews.recent(c.get('user').id, parseQuery(c, v.reviewsQuery).limit) }),
+      get: async (c: C) => c.json({ review: await s.reviews.get(c.get('user').id, parseParams(c, v.weekParam).week) }),
+      save: async (c: C) =>
+        c.json({ review: await s.reviews.save(c.get('user').id, parseParams(c, v.weekParam).week, await parseBody(c, v.saveReview)) }),
+    },
+
     admin: {
       listUsers: async (c: C) => c.json({ users: await s.admin.listUsers(parseQuery(c, v.userStatusQuery).status) }),
       approve: async (c: C) => c.json({ user: await s.admin.decide(c.get('user').id, parseParams(c, v.idParam).id, 'approved') }),

@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { CornerDownLeft, Moon, Play, Plus, Search, Square } from 'lucide-react'
+import { CornerDownLeft, Moon, Play, Plus, Search, Sparkles, Square } from 'lucide-react'
 import { parseQuickAdd } from '@timedesk/shared'
 import { ProjectDot } from '@/components/project-dot'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { actions, lastTimerTarget, useStore } from '@/data/store'
+import { askTempoLink, TEMPO_PROMPTS } from '@/features/assistant/tempo-prompts'
 import { toggleMode } from '@/lib/appearance'
 import { navGroups } from '@/lib/nav'
 import { cn } from '@/lib/utils'
 
 interface Command {
   id: string
-  group: 'Timer' | 'Add' | 'Tasks' | 'Go to' | 'Other'
+  group: 'Timer' | 'Add' | 'Tempo' | 'Tasks' | 'Go to' | 'Other'
   label: string
   hint?: string
   icon?: React.ReactNode
@@ -70,6 +71,9 @@ export function CommandPalette() {
         icon: <Play />,
         run: () => void actions.resumeLast(),
       })
+    }
+    for (const prompt of [TEMPO_PROMPTS.plan, TEMPO_PROMPTS.day, TEMPO_PROMPTS.week]) {
+      out.push({ id: `tempo-${prompt}`, group: 'Tempo', label: prompt, icon: <Sparkles />, run: () => navigate(askTempoLink(prompt)) })
     }
     for (const t of tasks.filter((x) => x.status !== 'done').slice(0, 200)) {
       out.push({

@@ -29,8 +29,13 @@ export const DUE_BUCKET_LABEL: Record<DueBucket, string> = {
 
 /** Which due-date category a task falls in. "This week" = the next 2 to 7 days. */
 export function dueBucket(due: string | null, now: number): DueBucket {
+  return dueBucketOn(due, toDateKey(now))
+}
+
+/** Like dueBucket, for a given "today" (YYYY-MM-DD). The server uses it with the user's own date, not its clock's. */
+export function dueBucketOn(due: string | null, today: string): DueBucket {
   if (!due) return 'none'
-  const days = daysUntil(due, now)
+  const days = dayNumber(due) - dayNumber(today)
   if (days < 0) return 'overdue'
   if (days === 0) return 'today'
   if (days === 1) return 'tomorrow'

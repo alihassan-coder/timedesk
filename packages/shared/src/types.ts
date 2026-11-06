@@ -26,6 +26,8 @@ export interface Task {
   due: string | null
   recurrence: Recurrence | null
   createdAt: number // epoch ms
+  /** When it was marked done (epoch ms), or null while it is open. */
+  completedAt: number | null
 }
 
 /** One tracked block of time. endedAt === null means the timer is running. */
