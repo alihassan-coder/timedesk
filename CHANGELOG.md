@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 ### Google Calendar (two-way)
 - Connect your Google account in Settings -> Calendar. See your events on the Calendar page and in the Tasks day, week and month views, and add, edit or delete events from timedesk
