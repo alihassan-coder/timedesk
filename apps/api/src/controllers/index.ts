@@ -80,6 +80,13 @@ export function createControllers(s: Services) {
       clear: async (c: C) => c.json(await s.activity.clear(c.get('user').id)),
     },
 
+    focus: {
+      ingest: async (c: C) => c.json(await s.focus.ingest(c.get('user').id, await parseBody(c, v.focusBatch)), 201),
+      list: async (c: C) => c.json({ sessions: await s.focus.list(c.get('user').id, parseQuery(c, v.timeRange)) }),
+      summary: async (c: C) => c.json(await s.focus.summary(c.get('user').id, parseQuery(c, v.timeRange))),
+      clear: async (c: C) => c.json(await s.focus.clear(c.get('user').id)),
+    },
+
     google: {
       status: async (c: C) => c.json(await s.calendar.status(c.get('user').id)),
       connect: async (c: C) => c.json(s.calendar.connectUrl(c.get('user').id, (await parseBody(c, v.googleConnectBody)).desktop)),

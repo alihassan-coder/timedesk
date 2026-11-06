@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { pomodoroPhase, type ActivitySample, type DesktopSettings } from '@timedesk/shared'
 import { actions, lastTimerTarget, loadStore, setMutationHook, useStore } from '@/data/store'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import { getDesktop } from '@/lib/desktop'
 import { notify } from '@/lib/notify'
 import { getTimerPrefs, useTimerPrefs } from '@/lib/timer-prefs'
@@ -13,7 +13,7 @@ import { getTimerPrefs, useTimerPrefs } from '@/lib/timer-prefs'
  */
 export function DesktopEffects() {
   const { entries, tasks, projects } = useStore()
-  const { titleTime } = useTimerPrefs()
+  const { titleTime, pomodoroFocus, pomodoroBreak } = useTimerPrefs()
   const running = entries.find((e) => e.endedAt === null)
   const runningRef = useRef(running)
   const entriesRef = useRef(entries)
@@ -27,8 +27,14 @@ export function DesktopEffects() {
     const d = getDesktop()
     if (!d) return
     const label = running ? (tasks.find((t) => t.id === running.taskId)?.title ?? projects.find((p) => p.id === running.projectId)?.name ?? 'Stopwatch') : ''
-    d.setTimerState({ running: !!running, label, startedAt: running?.startedAt ?? null, showInTitle: titleTime })
-  }, [running, tasks, projects, titleTime])
+    d.setTimerState({
+      running: !!running,
+      label,
+      startedAt: running?.startedAt ?? null,
+      showInTitle: titleTime,
+      pomodoro: { focus: pomodoroFocus, break: pomodoroBreak },
+    })
+  }, [running, tasks, projects, titleTime, pomodoroFocus, pomodoroBreak])
 
   // Start or stop the timer from the tray menu or the global shortcut. Starting resumes what the last timer was on.
   useEffect(() => {
@@ -114,10 +120,42 @@ export function DesktopEffects() {
         d.requeueActivity(samples.slice(sent) as ActivitySample[]) // try again next minute
       }
     }
-    const timer = setInterval(() => void upload(), 60_000)
+    // Focus guard sessions go up as soon as one finishes (the desktop app says so), and with the minute upload as a retry.
+    let sendingFocus = false
+    const uploadFocus = async () => {
+      if (sendingFocus) return
+      sendingFocus = true
+      try {
+        const sessions = await d.pullFocusSessions()
+        if (sessions.length === 0) return
+        for (let i = 0; i < sessions.length; i += 100) {
+          const batch = sessions.slice(i, i + 100)
+          try {
+            await api('/focus/sessions', { method: 'POST', body: { sessions: batch } })
+          } catch (e) {
+            // Offline or a server problem: try again later (the API skips sessions it already has). A batch the API
+            // refuses as invalid would be refused forever, so it is dropped.
+            if (!(e instanceof ApiError && e.status === 422)) d.requeueFocusSessions(sessions.slice(i))
+            return
+          }
+        }
+      } finally {
+        sendingFocus = false
+      }
+    }
+    const offFocus = d.onFocusState((s) => {
+      if (s.pending > 0) void uploadFocus()
+    })
+
+    const timer = setInterval(() => {
+      void upload()
+      void uploadFocus()
+    }, 60_000)
     return () => {
       clearInterval(timer)
+      offFocus()
       void upload()
+      void uploadFocus()
       d.setSignedIn(false)
     }
   }, [])

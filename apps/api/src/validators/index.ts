@@ -113,7 +113,34 @@ export const activityBatch = z.object({
     .max(500),
 })
 
+const seconds = z.number().int().min(0).max(86_400)
+/** Finished Focus guard sessions from the desktop app. A session ends after it starts, within a week (a timer left running overnight still counts). */
+export const focusBatch = z.object({
+  sessions: z
+    .array(
+      z
+        .object({
+          id: z.string().min(8).max(64),
+          startedAt: z.coerce.date(),
+          endedAt: z.coerce.date(),
+          label: z.string().max(200).default(''),
+          focusedSeconds: seconds,
+          distractedSeconds: seconds,
+          awaySeconds: seconds.default(0),
+          interruptions: z.number().int().min(0).max(10_000).default(0),
+          distractions: z
+            .array(z.object({ name: z.string().trim().min(1).max(120), seconds }))
+            .max(10)
+            .default([]),
+        })
+        .refine((s) => s.endedAt >= s.startedAt && s.endedAt.getTime() - s.startedAt.getTime() <= 7 * 86_400_000, 'A session must end after it starts, within a week.'),
+    )
+    .min(1)
+    .max(100),
+})
+
 export type ActivityBatch = z.infer<typeof activityBatch>
+export type FocusBatch = z.infer<typeof focusBatch>
 export type SaveChat = z.infer<typeof saveChat>
 export type CreateProject = z.infer<typeof createProject>
 export type UpdateProject = z.infer<typeof updateProject>

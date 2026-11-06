@@ -34,7 +34,7 @@ export function createAccountService(p: Parts) {
         .from(schema.user)
         .where(eq(schema.user.id, userId))
 
-      const [projects, tasks, timeEntries, reviews, settings, chats, activity, keys, google] = await Promise.all([
+      const [projects, tasks, timeEntries, reviews, settings, chats, activity, keys, google, focus] = await Promise.all([
         db.select().from(schema.projects).where(live(schema.projects, userId)).orderBy(asc(schema.projects.createdAt)),
         db.select().from(schema.tasks).where(live(schema.tasks, userId)).orderBy(asc(schema.tasks.createdAt)),
         db.select().from(schema.timeEntries).where(live(schema.timeEntries, userId)).orderBy(asc(schema.timeEntries.startedAt)),
@@ -44,6 +44,7 @@ export function createAccountService(p: Parts) {
         db.select().from(schema.activitySamples).where(eq(schema.activitySamples.userId, userId)).orderBy(asc(schema.activitySamples.startedAt)),
         p.aiKeys.list(userId),
         db.select().from(schema.googleConnections).where(eq(schema.googleConnections.userId, userId)),
+        db.select().from(schema.focusSessions).where(eq(schema.focusSessions.userId, userId)).orderBy(asc(schema.focusSessions.startedAt)),
       ])
 
       const chatIds = chats.map((c) => c.id)
@@ -81,6 +82,8 @@ export function createAccountService(p: Parts) {
         assistantMemories: memories,
         /** What the desktop app saw in the foreground. */
         activity: activity.map(({ userId: _u, ...a }) => a),
+        /** Focus guard sessions: focused and distracted time, and which listed apps or sites took it. */
+        focusSessions: focus.map(({ userId: _u, ...s }) => s),
         aiKeysSaved: keys.map((k) => k.provider),
         googleCalendar: google[0]
           ? { connected: true, email: google[0].email, calendarId: google[0].calendarId, pushTasks: google[0].pushTasks }

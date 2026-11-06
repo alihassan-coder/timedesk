@@ -5,6 +5,7 @@ import { createAdminService } from './admin.service.ts'
 import { createAiKeyService } from './ai-key.service.ts'
 import { createAssistantService } from './assistant.service.ts'
 import { createChatService } from './chat.service.ts'
+import { createFocusService } from './focus.service.ts'
 import { createGoogleCalendarService } from './google-calendar.service.ts'
 import { createProjectService } from './project.service.ts'
 import { createReviewService } from './review.service.ts'
@@ -23,6 +24,7 @@ export function createServices({ db, env, models, memory, google, auth }: Deps) 
   const settings = createSettingsService(db)
   const reviews = createReviewService(db)
   const activity = createActivityService(db)
+  const focus = createFocusService(db)
   /** Better Auth checks the password of whoever the headers belong to (cookie or desktop token). */
   const verifyPassword = async (headers: Headers, password: string) => {
     try {
@@ -35,6 +37,7 @@ export function createServices({ db, env, models, memory, google, auth }: Deps) 
   return {
     account: createAccountService({ db, aiKeys, memory, calendar, verifyPassword }),
     activity,
+    focus,
     admin: createAdminService(db),
     aiKeys,
     calendar,
@@ -44,7 +47,7 @@ export function createServices({ db, env, models, memory, google, auth }: Deps) 
     projects,
     tasks,
     time,
-    assistant: createAssistantService({ aiKeys, projects, tasks, time, models, memory, calendar, reviews, settings, activity }),
+    assistant: createAssistantService({ aiKeys, projects, tasks, time, models, memory, calendar, reviews, settings, activity, focus }),
   }
 }
 

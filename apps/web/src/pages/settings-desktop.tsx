@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { getDesktop, useUpdateStatus } from '@/lib/desktop'
+import { FocusGuardCard } from '@/features/focus'
 import { FloatingTimerCard } from '@/pages/widget-settings-card'
 
 /** Settings that only exist in the desktop app. Saved on this computer, not in your account. */
@@ -45,6 +46,8 @@ export function DesktopTab() {
       </Card>
 
       <FloatingTimerCard settings={settings} change={(patch) => void change(patch)} />
+
+      <FocusGuardCard settings={settings} change={(patch) => void change(patch)} />
 
       <Card>
         <CardHeader>

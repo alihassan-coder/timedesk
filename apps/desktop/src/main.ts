@@ -7,6 +7,8 @@ import { resolveAppFile } from './app-files.ts'
 import { linuxAutostartEntry, linuxAutostartPath } from './autostart.ts'
 import { DEFAULT_DESKTOP_SETTINGS, IPC, type AppInfo, type DesktopSettings, type TimerState, type UpdateStatus } from './bridge.ts'
 import { APP_ORIGIN, contentSecurityPolicy, isInternalUrl, isSafeExternalUrl, resolveConfig } from './config.ts'
+import { pomodoroPhase, type FocusSession } from '@timedesk/shared'
+import { createFocusGuard } from './focus.ts'
 import { createTracker, type ActivitySample, type ForegroundWindow } from './tracker.ts'
 import { createTray } from './tray.ts'
 import { setupUpdater } from './updater.ts'
@@ -92,8 +94,13 @@ async function foreground(): Promise<ForegroundWindow | null> {
   return w ? { app: w.owner.name, title: w.title } : null
 }
 
+// End-to-end tests name the window "in front" in a file, so they never depend on (or touch) the real desktop.
+// Only honoured when running from source, never in the installed app.
+const testForeground = !app.isPackaged ? process.env.TIMEDESK_TEST_FOREGROUND : undefined
+const readWindow = testForeground ? async () => readJson<ForegroundWindow>(testForeground) : foreground
+
 const tracker = createTracker({
-  getWindow: foreground,
+  getWindow: readWindow,
   getIdleSeconds: () => powerMonitor.getSystemIdleTime(),
   // Tests set this high so a machine nobody is touching still records.
   idleLimitSeconds: Number(process.env.TIMEDESK_IDLE_LIMIT_SECONDS) || undefined,
@@ -110,6 +117,59 @@ function syncTracking() {
     trackingTimer = undefined
     tracker.reset()
   }
+}
+
+// ---- focus guard ----------------------------------------------------------------------------------------
+const focus = createFocusGuard({
+  getWindow: readWindow,
+  getIdleSeconds: () => powerMonitor.getSystemIdleTime(),
+  idleLimitSeconds: Number(process.env.TIMEDESK_IDLE_LIMIT_SECONDS) || undefined,
+  rules: () => ({ apps: settings.focusApps, sites: settings.focusSites, nudgeSeconds: settings.focusNudgeSeconds }),
+  nudge: ({ match, label, seconds }) => {
+    log(`focus guard: nudge (${match}, ${seconds}s)`)
+    if (!Notification.isSupported()) return
+    const n = new Notification({
+      title: `Back to ${label || 'your focus'}?`,
+      body: `${match} has been in front for ${seconds < 120 ? `${seconds} seconds` : `${Math.round(seconds / 60)} minutes`} during your focus time.`,
+      icon: nativeImage.createFromPath(asset('icon.png')),
+    })
+    n.on('click', showWindow)
+    n.show()
+  },
+})
+
+let focusTimer: ReturnType<typeof setInterval> | undefined
+let lastFocusState = ''
+/** Tells the open windows how the focus session is going (only when something changed). */
+function sendFocusState() {
+  const s = focus.state()
+  const key = JSON.stringify(s)
+  if (key === lastFocusState) return
+  lastFocusState = key
+  for (const w of [win, widgetWin]) if (w && !w.isDestroyed()) w.webContents.send(IPC.focusEvent, s)
+}
+
+/** Is it a Pomodoro break right now? Only when the Pomodoro style is chosen, as that is when breaks are shown. */
+function onPomodoroBreak() {
+  if (settings.widgetMode !== 'pomodoro' || !timer.pomodoro || !timer.startedAt) return false
+  return pomodoroPhase(timer.startedAt, Date.now(), timer.pomodoro.focus, timer.pomodoro.break).phase === 'break'
+}
+
+/** A focus session runs while Focus guard is on, someone is signed in and a timer runs. */
+function syncFocus() {
+  const shouldRun = settings.focusGuard && signedIn && timer.running && timer.startedAt !== null
+  if (shouldRun) focus.start(String(timer.startedAt), timer.label || 'Stopwatch')
+  else focus.stop()
+  if (shouldRun && !focusTimer) {
+    focusTimer = setInterval(() => {
+      void focus.tick({ onBreak: onPomodoroBreak() }).then(sendFocusState)
+    }, 5000)
+  }
+  if (!shouldRun && focusTimer) {
+    clearInterval(focusTimer)
+    focusTimer = undefined
+  }
+  sendFocusState()
 }
 
 // ---- window ---------------------------------------------------------------------------------------------
@@ -402,6 +462,11 @@ function startTimers() {
 
 // ---- messages from the web app -------------------------------------------------------------------------
 const isStr = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max
+const minutes = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 1 && v <= 240
+function pomodoroLengths(v: unknown): TimerState['pomodoro'] {
+  const p = v as { focus?: unknown; break?: unknown } | undefined
+  return p && minutes(p.focus) && minutes(p.break) ? { focus: p.focus as number, break: p.break as number } : undefined
+}
 
 function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<typeof setupUpdater>) {
   // The login token is handed out only to our own pages, never to anything else that might load in the window.
@@ -458,10 +523,12 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
       label: isStr(s.label, 200) ? s.label : '',
       startedAt: typeof s.startedAt === 'number' ? s.startedAt : null,
       showInTitle: s.showInTitle !== false,
+      pomodoro: pomodoroLengths(s.pomodoro),
     }
     if (timer.running && !wasRunning) widgetDismissed = false // a new timer brings the floating timer back
     tray.update(timer)
     syncWidget()
+    syncFocus()
   })
 
   ipcMain.handle(IPC.getSettings, () => settings)
@@ -474,6 +541,7 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
     if (settings.widget !== before.widget) widgetDismissed = false
     if (settings.shortcuts !== before.shortcuts) applyShortcuts()
     syncWidget()
+    syncFocus()
     widgetWin?.webContents.send(IPC.dataChangedEvent) // the floating timer re-reads its style at once
     return settings
   })
@@ -486,6 +554,24 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
       quickWin?.hide()
     }
     syncWidget()
+    syncFocus()
+    if (!signedIn) {
+      // What was measured belongs to the person who just left; it is not handed to whoever signs in next.
+      focus.reset()
+      sendFocusState()
+    }
+  })
+
+  ipcMain.handle(IPC.focusState, () => focus.state())
+  ipcMain.handle(IPC.focusPull, (e) => {
+    if (!fromOurPage(e)) return []
+    const sessions = focus.drain()
+    sendFocusState()
+    return sessions
+  })
+  ipcMain.on(IPC.focusRequeue, (e, sessions: FocusSession[]) => {
+    if (!fromOurPage(e) || !Array.isArray(sessions)) return
+    focus.requeue(sessions.filter((s) => isStr(s?.id, 64) && isStr(s?.startedAt, 40) && typeof s.focusedSeconds === 'number'))
   })
 
   // The floating timer and quick add are windows of this app: they can hide themselves, open the main window, and

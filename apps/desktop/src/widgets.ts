@@ -1,4 +1,4 @@
-import { DEFAULT_DESKTOP_SETTINGS, type DesktopSettings, type TimerState, type WidgetMode } from '@timedesk/shared'
+import { DEFAULT_DESKTOP_SETTINGS, sanitizeFocusList, type DesktopSettings, type TimerState, type WidgetMode } from '@timedesk/shared'
 
 /** Pure rules for the floating timer, the window title, idle time and the settings. No Electron in here, so they are tested directly. */
 
@@ -123,9 +123,12 @@ const MODES: WidgetMode[] = ['compact', 'expanded', 'dock', 'pomodoro']
 export function sanitizeDesktopSettings(current: DesktopSettings, patch: unknown): DesktopSettings {
   const next: DesktopSettings = { ...DEFAULT_DESKTOP_SETTINGS, ...current }
   const p = (patch && typeof patch === 'object' ? patch : {}) as Record<string, unknown>
-  for (const k of ['autoStart', 'closeToTray', 'trackApps', 'trackTitles', 'shortcuts'] as const) if (typeof p[k] === 'boolean') next[k] = p[k]
+  for (const k of ['autoStart', 'closeToTray', 'trackApps', 'trackTitles', 'shortcuts', 'focusGuard'] as const) if (typeof p[k] === 'boolean') next[k] = p[k]
   if (p.widget === 'auto' || p.widget === 'always' || p.widget === 'never') next.widget = p.widget
   if (typeof p.widgetMode === 'string' && MODES.includes(p.widgetMode as WidgetMode)) next.widgetMode = p.widgetMode as WidgetMode
   if (typeof p.idleMinutes === 'number' && Number.isFinite(p.idleMinutes)) next.idleMinutes = Math.min(240, Math.max(0, Math.round(p.idleMinutes)))
+  if (Array.isArray(p.focusApps)) next.focusApps = sanitizeFocusList(p.focusApps)
+  if (Array.isArray(p.focusSites)) next.focusSites = sanitizeFocusList(p.focusSites)
+  if (typeof p.focusNudgeSeconds === 'number' && Number.isFinite(p.focusNudgeSeconds)) next.focusNudgeSeconds = Math.min(600, Math.max(5, Math.round(p.focusNudgeSeconds)))
   return next
 }

@@ -2,6 +2,8 @@ export type {
   ActivitySample,
   AppInfo,
   DesktopSettings,
+  FocusSession,
+  FocusState,
   IdleDecision,
   TimedeskBridge,
   TimerState,
@@ -38,4 +40,8 @@ export const IPC = {
   dataChangedEvent: 'timedesk:data:changed:event',
   idleDecision: 'timedesk:idle:decision',
   quickAddShown: 'timedesk:quick-add:shown',
+  focusState: 'timedesk:focus:state',
+  focusEvent: 'timedesk:focus:event',
+  focusPull: 'timedesk:focus:pull',
+  focusRequeue: 'timedesk:focus:requeue',
 } as const

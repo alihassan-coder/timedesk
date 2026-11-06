@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
+import { FocusSummaryCard } from '@/features/focus'
 import { TaskRow } from '@/features/task-row'
 import { askTempoLink, TEMPO_PROMPTS } from '@/features/assistant/tempo-prompts'
 import { useProfile } from '@/lib/auth-client'
@@ -115,6 +116,7 @@ export default function Dashboard() {
       </div>
 
       {!isNew && <TempoCard now={now} />}
+      {!isNew && <FocusSummaryCard now={now} />}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">

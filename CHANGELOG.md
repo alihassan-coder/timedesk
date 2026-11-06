@@ -2,7 +2,21 @@
 
 ## Unreleased
 
-Needs the backend update and database migration `0004_reviews_and_completed` (run `pnpm --filter @timedesk/db db:migrate` before the API goes live).
+Needs the backend update and database migrations `0004_reviews_and_completed` and `0005_focus_sessions` (run `pnpm --filter @timedesk/db db:migrate` before the API goes live), and a new desktop release for Focus guard.
+
+### Focus guard (desktop)
+- Settings, Desktop, **Focus guard**: an on/off switch (off by default), your lists of distracting apps (for example Discord, Steam) and sites (words in the browser tab title, for example YouTube, reddit.com), with one-click suggestions, and how long a distraction may last before the nudge (10 seconds to 2 minutes)
+- While a timer runs, the desktop app checks which program is in front every 5 seconds. When a listed app or site stays in front past the delay you get a notification ("Back to Write docs?"), and again every 2 minutes if it goes on. A quick look is counted but not nudged
+- The floating timer turns orange and shows "YouTube 0:42 · back to Write docs?" in every style
+- Rests during Pomodoro breaks (when the Pomodoro style is chosen); time away from the computer counts as away, not distracted
+- Each finished session (a minute or longer) is saved to your account: focused and distracted time, nudges, and which of your listed names took time. Window titles are matched on your computer and never saved or sent
+- Dashboard: a **Focus** card with today's and the last 7 days' focus score, interruptions and the biggest distraction, live while a session runs
+- Tempo's daily summary and weekly review include your focus score and top distractions
+- Included in the JSON export, deleted with the account. API: `POST/GET/DELETE /focus/sessions`, `GET /focus/summary`
+
+### Faster start
+- The web app is split per page: the first screen now downloads about 583 KB of JavaScript (198 KB compressed) instead of 1.5 MB (458 KB). Charts, the Tempo chat and the calendar load when you open them. Same for the desktop app's built-in interface
+- After a new version is deployed, an open tab that asks for an old page file reloads once instead of showing an error
 
 ### Tempo
 - **Plan my day**: Tempo orders your open tasks by what needs attention (overdue, due today, started, high priority), fits them around your Google Calendar events and your daily goal, and proposes time blocks from the current time

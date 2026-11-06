@@ -44,6 +44,11 @@ export function createRoutes(c: Controllers) {
   r.delete('/activity/:id', c.activity.removeOne)
   r.delete('/activity', c.activity.clear)
 
+  r.post('/focus/sessions', c.focus.ingest)
+  r.get('/focus/sessions', c.focus.list)
+  r.get('/focus/summary', c.focus.summary)
+  r.delete('/focus/sessions', c.focus.clear)
+
   r.get('/integrations/google', c.google.status)
   r.patch('/integrations/google', c.google.settings)
   r.post('/integrations/google/connect', c.google.connect)

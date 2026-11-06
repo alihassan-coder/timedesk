@@ -12,6 +12,8 @@ import {
   type WidgetMode,
 } from '@timedesk/shared'
 import { ProjectDot } from '@/components/project-dot'
+import { useFocusState } from '@/features/focus'
+import { clockOf } from '@/lib/clock'
 import { actions, bindStore, lastTimerTarget, loadStore, setMutationHook, useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
 import { useProfile } from '@/lib/auth-client'
@@ -63,6 +65,7 @@ export default function WidgetPage() {
   const { settings, setMode } = useWidgetSettings()
   const { entries, tasks, projects, ready } = useStore()
   const prefs = useTimerPrefs()
+  const focus = useFocusState()
   useAppearance() // applies the saved theme to this window too
 
   // Same data as the main window: load it, refresh often, and reload at once when the other window changes something.
@@ -105,6 +108,13 @@ export default function WidgetPage() {
     : 'Stopwatch'
 
   const mode = settings.widgetMode
+  // Focus guard: a listed app or site is in front. Shown in every style, in orange, until the person is back.
+  const distracted = !!running && focus.active && focus.distracted && focus.match !== null
+  const nudge = distracted ? (
+    <span className="min-w-0 flex-1 truncate text-xs font-medium text-orange-600 dark:text-orange-400" role="status">
+      {focus.match} {clockOf(focus.streakSeconds)} · back to {label}?
+    </span>
+  ) : null
   const toggle = () => (running ? void actions.stopTimer() : void actions.resumeLast())
 
   if (!ready) return <div className="bg-background text-muted-foreground flex h-svh w-svw items-center justify-center text-xs">Loading</div>
@@ -155,7 +165,10 @@ export default function WidgetPage() {
     </div>
   )
 
-  const root = 'bg-background text-foreground [-webkit-app-region:drag] h-svh w-svw overflow-hidden border select-none'
+  const root = cn(
+    'bg-background text-foreground [-webkit-app-region:drag] h-svh w-svw overflow-hidden border select-none',
+    distracted && 'border-2 border-orange-500',
+  )
 
   /* ----------------------------- compact ----------------------------- */
   if (mode === 'compact') {
@@ -163,7 +176,7 @@ export default function WidgetPage() {
       <div className={cn(root, 'flex items-center gap-2.5 pr-1 pl-3')}>
         {live}
         <span className="font-mono text-[17px] font-semibold tabular-nums">{clock}</span>
-        <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">{label}</span>
+        {nudge ?? <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">{label}</span>}
         {stopBtn}
         <IconBtn label="Expand" onClick={() => setMode('expanded')} className={NO_DRAG}>
           <Maximize2 />
@@ -178,10 +191,12 @@ export default function WidgetPage() {
       <div className={cn(root, 'flex items-center gap-3 px-3')}>
         {live}
         <span className="font-mono text-sm font-semibold tabular-nums">{clock}</span>
-        <span className="min-w-0 flex-1 truncate text-sm">
-          {label}
-          {project && running && <span className="text-muted-foreground"> · {project.name}</span>}
-        </span>
+        {nudge ?? (
+          <span className="min-w-0 flex-1 truncate text-sm">
+            {label}
+            {project && running && <span className="text-muted-foreground"> · {project.name}</span>}
+          </span>
+        )}
         {goalMs > 0 && (
           <div className="hidden w-28 items-center gap-2 sm:flex" title={`${formatShort(today)} of ${formatGoal(prefs.dailyGoalMinutes)} today`}>
             <div className="bg-muted h-1.5 flex-1 overflow-hidden rounded-full">
@@ -247,7 +262,7 @@ export default function WidgetPage() {
             <span className="text-muted-foreground text-[11px]">{phase ? 'left' : `${prefs.pomodoroFocus} min focus`}</span>
           </div>
         </div>
-        <p className="max-w-full truncate text-sm font-medium">{running ? label : resumeLabel}</p>
+        {nudge ? <p className="flex max-w-full">{nudge}</p> : <p className="max-w-full truncate text-sm font-medium">{running ? label : resumeLabel}</p>}
         <div className="flex w-full items-center gap-2">
           <button
             type="button"
@@ -275,7 +290,7 @@ export default function WidgetPage() {
       </div>
       <div className="flex items-center gap-2">
         {live}
-        <span className="text-muted-foreground text-xs">{running ? 'Tracking' : 'Not tracking'}</span>
+        {nudge ?? <span className="text-muted-foreground text-xs">{running ? (focus.active ? 'Tracking · Focus guard on' : 'Tracking') : 'Not tracking'}</span>}
       </div>
       <div className="font-mono text-[34px] leading-none font-semibold tracking-tight tabular-nums">{clock}</div>
       <div className="min-w-0">

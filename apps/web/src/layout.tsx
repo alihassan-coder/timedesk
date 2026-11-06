@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { Link, Outlet, useLocation } from 'react-router'
 import { Moon, Settings, Sun } from 'lucide-react'
 import { AppSidebar } from '@/components/app-sidebar'
@@ -66,7 +66,10 @@ export default function Layout() {
           </div>
         </header>
         <main className={pathname === '/assistant' ? 'flex-1' : 'mx-auto w-full max-w-6xl flex-1 space-y-6 p-4 md:p-8'}>
-          <Outlet />
+          {/* Pages load on first visit; the sidebar and top bar stay put meanwhile. */}
+          <Suspense fallback={<p className="text-muted-foreground animate-pulse py-10 text-center text-sm">Loading...</p>}>
+            <Outlet />
+          </Suspense>
         </main>
       </SidebarInset>
     </SidebarProvider>

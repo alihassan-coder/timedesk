@@ -24,6 +24,7 @@ import { AppError, badRequest } from '../utils/errors.ts'
 import type { AiProvider } from '../validators/index.ts'
 import { aiProviders } from '../validators/index.ts'
 import type { ActivityService } from './activity.service.ts'
+import type { FocusService } from './focus.service.ts'
 import type { AiKeyService } from './ai-key.service.ts'
 import type { GoogleCalendarService } from './google-calendar.service.ts'
 import type { ProjectService } from './project.service.ts'
@@ -43,6 +44,8 @@ interface Parts {
   reviews?: ReviewService
   settings?: SettingsService
   activity?: ActivityService
+  /** Focus guard sessions from the desktop app. */
+  focus?: FocusService
   models: ModelFactory
   memory: MemoryProvider
   now?: () => Date
@@ -211,6 +214,20 @@ export function createAssistantService(p: Parts) {
       const s = await p.activity.summary(user.id, { from: new Date(from), to: new Date(to) })
       return s.byApp.slice(0, 5).map((a) => ({ app: a.app, time: formatHours(a.seconds * 1000) }))
     }
+    /** Focus guard results for a range, or null when no session ran in it. Listed names only, never window titles. */
+    const focusFacts = async (from: number, to: number) => {
+      if (!p.focus) return null
+      const f = await p.focus.summary(user.id, { from: new Date(from), to: new Date(to) })
+      if (f.sessions === 0) return null
+      return {
+        sessions: f.sessions,
+        scorePercent: f.score,
+        focused: formatHours(f.focusedSeconds * 1000),
+        distracted: formatHours(f.distractedSeconds * 1000),
+        interruptions: f.interruptions,
+        topDistractions: f.topDistractions.map((d) => ({ name: d.name, time: formatHours(d.seconds * 1000) })),
+      }
+    }
     /** Loads what a digest needs. Entries are read from a week before the range, so timers that cross midnight count. */
     const loadRange = async (from: number, to: number) => {
       const [projects, taskRows, entryRows] = await Promise.all([
@@ -233,7 +250,7 @@ export function createAssistantService(p: Parts) {
     return {
       daily_summary: tool({
         description:
-          'Facts for a summary of one day: time tracked (total, by project, compared with the day before), tasks finished, what is still due, the daily goal, and the apps used most. Use it for "summarize my day", "how did today go" or "what did I do yesterday".',
+          'Facts for a summary of one day: time tracked (total, by project, compared with the day before), tasks finished, what is still due, the daily goal, the apps used most, and focus (Focus guard score, interruptions, top distractions) when the desktop app measured it. Use it for "summarize my day", "how did today go" or "what did I do yesterday".',
         inputSchema: z.object({ date: dateKey.optional().describe('The day. Defaults to today') }),
         execute: async ({ date }) => {
           const day = date ?? today()
@@ -257,6 +274,7 @@ export function createAssistantService(p: Parts) {
             overdue: openTitles(data.tasks, ['overdue'], day),
             dueTomorrow: openTitles(data.tasks, ['today'], addDays(day, 1)),
             topApps: await topApps(d.start, d.end),
+            focus: await focusFacts(d.start, d.end),
             ...(isToday ? { timerRunning: await runningNow() } : {}),
           }
         },
@@ -264,7 +282,7 @@ export function createAssistantService(p: Parts) {
 
       weekly_review: tool({
         description:
-          'Facts for a weekly review (Monday to Sunday): time per day and per project, compared with the week before, best day, days the goal was met, tasks finished, what carries over, the apps used most, and the reflection the user wrote for that week and their plan from the week before. Use it for "weekly review", "how was my week".',
+          'Facts for a weekly review (Monday to Sunday): time per day and per project, compared with the week before, best day, days the goal was met, tasks finished, what carries over, the apps used most, focus (Focus guard score and top distractions) when measured, and the reflection the user wrote for that week and their plan from the week before. Use it for "weekly review", "how was my week".',
         inputSchema: z.object({ weekOf: dateKey.optional().describe('Any day in the week. Defaults to this week') }),
         execute: async ({ weekOf }) => {
           const monday = startOfWeek(weekOf ?? today())
@@ -273,10 +291,11 @@ export function createAssistantService(p: Parts) {
           const data = await loadRange(prev[0].start, days[6].end)
           const g = buildDigest({ days, previousDays: prev, ...data, now: now().getTime() })
           const goal = await goalMinutes()
-          const [review, lastWeek, apps] = await Promise.all([
+          const [review, lastWeek, apps, focusWeek] = await Promise.all([
             p.reviews?.get(user.id, monday),
             p.reviews?.get(user.id, addDays(monday, -7)),
             topApps(days[0].start, days[6].end),
+            focusFacts(days[0].start, days[6].end),
           ])
           const change = g.previousTotalMs ? Math.round(((g.totalMs - g.previousTotalMs) / g.previousTotalMs) * 100) : null
           return {
@@ -291,6 +310,7 @@ export function createAssistantService(p: Parts) {
             finished: g.completed.map((t) => (t.project ? `${t.title} (${t.project})` : t.title)),
             carryOver: openTitles(data.tasks, ['overdue', 'today'], today()),
             topApps: apps,
+            focus: focusWeek,
             reflection: review && (review.wentWell || review.improve) ? { wentWell: review.wentWell, willChange: review.improve } : null,
             planFromWeekBefore: lastWeek?.improve || null,
           }
