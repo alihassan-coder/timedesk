@@ -259,6 +259,8 @@ function pinOnTop(w: BrowserWindow) {
       w.setAlwaysOnTop(true, level)
       if (w.isAlwaysOnTop()) break
     }
+    // The "skip taskbar" flag given when the window was created is ignored by some Linux window managers, so it is set again.
+    w.setSkipTaskbar(true)
     w.moveTop()
     if (!w.isAlwaysOnTop()) log('the window did not accept always-on-top')
   } catch (e) {

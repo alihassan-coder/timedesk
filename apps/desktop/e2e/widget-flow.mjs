@@ -87,6 +87,13 @@ try {
   })
 
   await step('Automatic: no floating window while timedesk is in front, even with a timer running', async () => {
+    if (process.platform === 'linux') {
+      // A virtual screen has no person to click on a window: give the main window the focus, as a person would.
+      const rows = execFileSync('wmctrl', ['-lGp']).toString().split('\n').filter(Boolean).map((l) => l.trim().split(/\s+/))
+      const mainRow = rows.find((p) => Number(p[2]) === app.pid && Number(p[5]) >= 600)
+      if (mainRow) execFileSync('wmctrl', ['-i', '-a', mainRow[0]])
+      await sleep(800)
+    }
     await main.ev(`document.querySelector('[aria-label="Floating timer style"] [role=radio]').click()`)
     await clickText(main, 'Start timer')
     await waitFor(main, bodyHas('Stopwatch (no task)'), 'timer menu')
