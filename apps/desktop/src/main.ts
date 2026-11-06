@@ -253,18 +253,24 @@ function smallWindow(path: string, size: { width: number; height: number }): Bro
 }
 
 /** Keeps a small window above every other window. Applied each time it is shown, because showing can reset it. */
-function pinOnTop(w: BrowserWindow) {
+function pinOnTop(w: BrowserWindow, justShown = false) {
   try {
     for (const level of ['floating', 'pop-up-menu', 'screen-saver'] as const) {
       w.setAlwaysOnTop(true, level)
       if (w.isAlwaysOnTop()) break
     }
-    // The "skip taskbar" flag given when the window was created is ignored by some Linux window managers, so it is set again.
-    // Electron remembers the flag as already set and then sends nothing, so on Linux it is switched off and on to make the request real.
-    if (process.platform === 'linux') w.setSkipTaskbar(false)
     w.setSkipTaskbar(true)
     w.moveTop()
     if (!w.isAlwaysOnTop()) log('the window did not accept always-on-top')
+    // Linux window managers ignore a "skip taskbar" request sent before the window is on screen (and Electron does not send
+    // it again while it thinks the flag is already set), so a moment after the window appears it is switched off and on.
+    if (process.platform === 'linux' && justShown) {
+      setTimeout(() => {
+        if (w.isDestroyed() || !w.isVisible()) return
+        w.setSkipTaskbar(false)
+        w.setSkipTaskbar(true)
+      }, 500)
+    }
   } catch (e) {
     log(`could not keep the window on top: ${(e as Error).message}`)
   }
@@ -313,8 +319,9 @@ function syncWidget() {
   if (show) {
     const w = ensureWidget()
     if (placedMode !== settings.widgetMode || !w.isVisible()) placeWidget()
-    if (!w.isVisible()) w.showInactive() // never steal the keyboard from what the person is doing
-    pinOnTop(w)
+    const fresh = !w.isVisible()
+    if (fresh) w.showInactive() // never steal the keyboard from what the person is doing
+    pinOnTop(w, fresh)
     log(`floating timer: ${settings.widgetMode} bounds=${JSON.stringify(w.getBounds())} visible=${w.isVisible()} onTop=${w.isAlwaysOnTop()}`)
   } else if (widgetWin && !widgetWin.isDestroyed() && widgetWin.isVisible()) {
     widgetWin.hide()
@@ -337,7 +344,7 @@ function showQuickAdd() {
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
   quickWin.setBounds({ x: Math.round(area.x + (area.width - QUICK_SIZE.width) / 2), y: Math.round(area.y + area.height * 0.28), ...QUICK_SIZE })
   quickWin.show()
-  pinOnTop(quickWin)
+  pinOnTop(quickWin, true)
   quickWin.focus()
   const w = quickWin
   const announce = () => w.webContents.send(IPC.quickAddShown)
