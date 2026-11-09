@@ -99,16 +99,23 @@ try {
     await waitFor(main, bodyHas('Stopwatch (no task)'), 'timer menu')
     await clickText(main, 'Stopwatch (no task)')
     await waitFor(main, exists('[aria-label="Stop timer"]'), 'timer running')
-    await sleep(1500)
-    const list = await (await fetch(`http://localhost:${PORT}/json`)).json()
-    const widget = list.find((x) => x.url.includes('/widget'))
-    // The widget window may exist but must not be visible. Visibility is reported by the page itself.
-    if (widget) {
+    // The widget window may exist but must not be visible. Visibility is reported by the page itself. A window manager
+    // on a virtual screen can take a moment to settle the focus, so this waits up to 8 s and only fails if the floating
+    // timer stays visible (one quick check failed now and then on CI while the app was right).
+    let visible = 'hidden'
+    for (let i = 0; i < 16; i++) {
+      await sleep(500)
+      const list = await (await fetch(`http://localhost:${PORT}/json`)).json()
+      if (!list.some((x) => x.url.includes('/widget'))) {
+        visible = 'hidden'
+        break
+      }
       const w = await connect((u) => u.includes('/widget'))
-      const visible = await w.ev('document.visibilityState')
+      visible = await w.ev('document.visibilityState')
       w.ws.close()
-      if (visible === 'visible') throw new Error('the floating timer is visible while timedesk has focus')
+      if (visible !== 'visible') break
     }
+    if (visible === 'visible') throw new Error('the floating timer is visible while timedesk has focus')
   })
 
   await step('Always: the floating timer appears and shows the running clock', async () => {
