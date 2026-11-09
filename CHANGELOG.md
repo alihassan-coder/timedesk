@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
-Needs the backend update and database migrations `0004_reviews_and_completed`, `0005_focus_sessions`, `0006_multitask_and_custom_colors` and `0007_top_tasks` (run `pnpm --filter @timedesk/db db:migrate` before the API goes live), and a new desktop release.
+Needs the backend update and database migrations `0004_reviews_and_completed` to `0007_top_tasks` (`pnpm --filter @timedesk/db db:migrate`, run before the API goes live). Update the desktop app to get the focus guard, multitasking widget and the Linux icon fix.
 
 ### Today's top 3
 - Pick the 3 tasks that matter most today: a card at the top of the dashboard with a tick box, Start and Stop for each, and "Pick a task" listing the most pressing ones first. Or click the star on any task
