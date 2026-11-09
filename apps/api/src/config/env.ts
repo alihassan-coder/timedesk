@@ -1,5 +1,8 @@
 import { z } from 'zod'
 
+/** An empty line like `GOOGLE_REDIRECT_URI=` (as in .env.example) means "not set", not an invalid value. */
+const blankIsUnset = <T extends z.ZodTypeAny>(inner: T) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), inner)
+
 const schema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   BETTER_AUTH_SECRET: z.string().min(32, 'BETTER_AUTH_SECRET must be at least 32 characters'),
@@ -24,10 +27,10 @@ const schema = z.object({
   DESKTOP_ORIGIN: z.string().default('app://timedesk'),
   KEY_ENCRYPTION_SECRET: z.string().min(32, 'KEY_ENCRYPTION_SECRET must be at least 32 characters'),
   /** Google Calendar. All optional: without the client id and secret the feature is switched off. */
-  GOOGLE_CLIENT_ID: z.string().optional(),
-  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CLIENT_ID: blankIsUnset(z.string().optional()),
+  GOOGLE_CLIENT_SECRET: blankIsUnset(z.string().optional()),
   /** Defaults to <BETTER_AUTH_URL>/v1/integrations/google/callback. Must match the address in the Google Cloud console. */
-  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+  GOOGLE_REDIRECT_URI: blankIsUnset(z.string().url().optional()),
 })
 
 export type Env = z.infer<typeof schema>

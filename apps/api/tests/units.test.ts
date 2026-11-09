@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { loadEnv } from '../src/config/env.ts'
+import { googleRedirectUri, loadEnv } from '../src/config/env.ts'
 import { decryptSecret, encryptSecret } from '../src/utils/crypto.ts'
 import { within } from '../src/lib/memory.ts'
 import { listModels, SUGGESTED_MODELS } from '../src/lib/models.ts'
@@ -49,6 +49,13 @@ describe('environment validation', () => {
   it('fails loudly when a secret is missing or too short', () => {
     expect(() => loadEnv({ ...good, BETTER_AUTH_SECRET: 'short' })).toThrow(/BETTER_AUTH_SECRET/)
     expect(() => loadEnv({ ...good, DATABASE_URL: undefined })).toThrow(/DATABASE_URL/)
+  })
+
+  it('treats the empty optional Google lines from .env.example as not set', () => {
+    const env = loadEnv({ ...good, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: ' ', GOOGLE_REDIRECT_URI: '', BETTER_AUTH_URL: 'https://api.example.com' })
+    expect(env.GOOGLE_CLIENT_ID).toBeUndefined()
+    expect(env.GOOGLE_CLIENT_SECRET).toBeUndefined()
+    expect(googleRedirectUri(env)).toBe('https://api.example.com/v1/integrations/google/callback')
   })
 })
 

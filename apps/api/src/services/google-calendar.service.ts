@@ -7,6 +7,7 @@ import {
   GoogleAuthError,
   GoogleUnauthorizedError,
   GoogleUnreachableError,
+  type GoogleClient,
   type GoogleConfig,
   type GoogleEvent,
   type GoogleEventInput,
@@ -46,6 +47,7 @@ function googleFailure(e: unknown): unknown {
     return e.timeout ? gatewayTimeout('Google Calendar took too long to answer. Try again in a moment.') : badGateway('Could not reach Google Calendar. Try again in a moment.')
   }
   if (e instanceof GoogleApiError) {
+    console.error('Google Calendar:', e.message)
     if (e.status === 400) return unprocessable('Google Calendar did not accept that. Check the dates, time zone and title.')
     if (e.status === 403 || e.status === 429) return unavailable('Google Calendar is limiting requests right now. Try again in a few minutes.')
     return badGateway('Google Calendar did not answer. Try again in a moment.')
@@ -393,14 +395,23 @@ export function createGoogleCalendarService(db: Db, secret: string, webOrigin: s
      */
     async sync(userId: string): Promise<GoogleSyncResult & { remaining: number }> {
       // Where the next sync starts. When Google had more changes than one listing reads, only as far as was read.
-      let syncedUpTo = now()
+      let syncedUpTo: Date | null = now()
       const result = await withGoogle(userId, async (token, c) => {
-        const since = new Date((c.lastSyncAt ?? new Date(now().getTime() - 30 * 86_400_000)).getTime() - 60_000)
-        const changed = await need().client.listEvents(token, c.calendarId, { updatedMin: since.toISOString(), privateProp: 'timedeskManaged=1', showDeleted: true })
+        const managed = { privateProp: 'timedeskManaged=1', showDeleted: true, oldestChangeFirst: true }
+        // First sync: read every event timedesk manages. Later: only what changed since the last sync.
+        const since = c.lastSyncAt ? new Date(c.lastSyncAt.getTime() - 60_000) : null
+        let changed: Awaited<ReturnType<GoogleClient['listEvents']>>
+        try {
+          changed = await need().client.listEvents(token, c.calendarId, since ? { ...managed, updatedMin: since.toISOString() } : managed)
+        } catch (e) {
+          // Google only reports changes of roughly the last 20 days, and answers 410 for older ones: read them all once instead.
+          if (!(since && e instanceof GoogleApiError && e.status === 410)) throw e
+          changed = await need().client.listEvents(token, c.calendarId, managed)
+        }
         const out: GoogleSyncResult = { checked: 0, updatedTasks: 0, pushed: 0, unlinked: 0 }
         if (changed.more) {
           const last = Math.max(...changed.map((e) => Date.parse(e.updated ?? '')).filter((t) => Number.isFinite(t)))
-          syncedUpTo = Number.isFinite(last) ? new Date(last) : (c.lastSyncAt ?? since)
+          syncedUpTo = Number.isFinite(last) ? new Date(last) : c.lastSyncAt // nothing usable read: start from the same place again
         }
 
         for (const e of changed) {

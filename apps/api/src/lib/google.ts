@@ -42,6 +42,8 @@ export interface GoogleEventQuery {
   /** key=value on the event's private properties. */
   privateProp?: string
   showDeleted?: boolean
+  /** Oldest change first, so a listing cut off after the last page still tells how far it got. */
+  oldestChangeFirst?: boolean
 }
 
 export interface GoogleTokens {
@@ -127,8 +129,14 @@ export function createGoogleClient(opts: { clientId: string; clientSecret: strin
     if (res.status === 401) throw new GoogleUnauthorizedError('Google rejected the access token.')
     return res
   }
+  /** Google's own reason (for example "updatedMinTooLongAgo") makes a failure in the logs understandable. No tokens are in it. */
+  async function failure(res: Response) {
+    const body = (await res.json().catch(() => null)) as { error?: { errors?: { reason?: string }[]; message?: string } } | null
+    const reason = body?.error?.errors?.[0]?.reason ?? body?.error?.message
+    return new GoogleApiError(res.status, `Google Calendar answered ${res.status}${reason ? ` (${String(reason).slice(0, 120)})` : ''}.`)
+  }
   async function ok<T>(res: Response): Promise<T> {
-    if (!res.ok) throw new GoogleApiError(res.status, `Google Calendar answered ${res.status}.`)
+    if (!res.ok) throw await failure(res)
     return reach(() => res.json() as Promise<T>)
   }
 
@@ -196,11 +204,8 @@ export function createGoogleClient(opts: { clientId: string; clientSecret: strin
         const params = new URLSearchParams({ maxResults: '250', singleEvents: 'true' })
         if (q.timeMin) params.set('timeMin', q.timeMin)
         if (q.timeMax) params.set('timeMax', q.timeMax)
-        // Changes oldest first, so a listing cut off after the last page still tells how far it got.
-        if (q.updatedMin) {
-          params.set('updatedMin', q.updatedMin)
-          params.set('orderBy', 'updated')
-        }
+        if (q.updatedMin) params.set('updatedMin', q.updatedMin)
+        if (q.updatedMin || q.oldestChangeFirst) params.set('orderBy', 'updated')
         if (q.privateProp) params.set('privateExtendedProperty', q.privateProp)
         if (q.showDeleted) params.set('showDeleted', 'true')
         if (pageToken) params.set('pageToken', pageToken)
@@ -231,7 +236,7 @@ export function createGoogleClient(opts: { clientId: string; clientSecret: strin
     async deleteEvent(token, calendarId, eventId) {
       const res = await call(`${API}/calendars/${enc(calendarId)}/events/${enc(eventId)}`, token, { method: 'DELETE' })
       if (res.status === 404 || res.status === 410) return
-      if (!res.ok) throw new GoogleApiError(res.status, `Google Calendar answered ${res.status}.`)
+      if (!res.ok) throw await failure(res)
     },
   }
 }

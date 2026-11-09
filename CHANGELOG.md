@@ -13,6 +13,12 @@ Needs the backend update and database migrations `0004_reviews_and_completed`, `
 - **Fill in the gaps:** the parts of the day no timer covered, with what they probably were: a meeting from your Google Calendar, the apps you used (desktop app tracking), or just "not tracked". The project is guessed from your history (which project you usually track while that app is in front). Pick a project or task and Add, or Skip. Also on the Timesheet for any day of the week
 - Time added this way works offline like everything else
 
+### Google Calendar
+- "Sync now" no longer fails with "Google Calendar did not answer" on the first sync, or after about three weeks without one (Google only reports changes of the last ~20 days; timedesk now reads its events in full when needed)
+- Problems with Google show Google's reason in the server log
+- An empty `GOOGLE_REDIRECT_URI=` line in `.env` no longer stops the API from starting
+- `scripts/setup-google-calendar.sh` walks you through creating the Google keys
+
 ### Linux
 - The dock and taskbar show the timedesk logo instead of a generic gear icon. The AppImage adds itself to the app menu
 

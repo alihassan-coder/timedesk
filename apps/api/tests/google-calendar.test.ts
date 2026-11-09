@@ -359,6 +359,19 @@ describe('Google Calendar: tasks and events stay in step', () => {
     expect((await (await ann.get('/integrations/google')).json()).lastSyncAt).not.toBeNull()
   })
 
+  it('a sync after weeks away still works, although Google only reports changes of about the last 20 days', async () => {
+    const id = await taskId('Invoice client')
+    await t.db.update(schema.googleConnections).set({ lastSyncAt: new Date(Date.now() - 40 * 86_400_000) })
+    const event = mirrors().find((e) => e.extendedProperties?.private?.timedeskTaskId === id)!
+    fake.editInGoogle('ann@gmail.test', event.id, { summary: 'Invoice client now' })
+
+    const res = await ann.post('/calendar/sync')
+    expect(res.status).toBe(200)
+    expect((await res.json()).updatedTasks).toBe(1)
+    await ann.patch(`/tasks/${id}`, { title: 'Invoice client' })
+    await ann.post('/calendar/sync')
+  })
+
   it("timedesk's own writes do not echo back as changes", async () => {
     const res = await (await ann.post('/calendar/sync')).json()
     expect(res.updatedTasks).toBe(0)
@@ -633,7 +646,7 @@ describe('Google Calendar: when Google misbehaves', () => {
       ...fake.client,
       listEvents: async (token, cal, q) => {
         const list = await fake.client.listEvents(token, cal, q)
-        return q.updatedMin ? Object.assign([...list], { more: true }) : list
+        return q.showDeleted ? Object.assign([...list], { more: true }) : list // every sync listing, the first (full) one too
       },
     }
     const t = await appWith({ client: cutOff })
