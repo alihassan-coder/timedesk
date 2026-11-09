@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { linuxAutostartEntry, linuxAutostartPath } from '../src/autostart.ts'
+import { LINUX_WM_CLASS, linuxAutostartEntry, linuxAutostartPath, linuxDesktopEntry, linuxDesktopEntryPath, linuxIconPath } from '../src/autostart.ts'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { createTracker, type ForegroundWindow } from '../src/tracker.ts'
 import { sanitizeBounds } from '../src/window-state.ts'
 
@@ -162,5 +164,29 @@ describe('start with the computer on Linux', () => {
 
   it('lives in the per-user autostart folder', () => {
     expect(linuxAutostartPath('/home/sam')).toBe('/home/sam/.config/autostart/timedesk.desktop')
+  })
+})
+
+describe('Linux dock icon', () => {
+  // Docks show an app's icon by matching its window name (WM_CLASS / app_id) to StartupWMClass in a .desktop file.
+  it('the window name comes from desktopName, and every entry points at it', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { desktopName?: string }
+    expect(pkg.desktopName).toBe(`${LINUX_WM_CLASS}.desktop`)
+    expect(linuxAutostartEntry('/opt/timedesk/timedesk')).toContain('StartupWMClass=timedesk')
+    expect(linuxDesktopEntry('/home/sam/Apps/timedesk.AppImage', '/home/sam/icon.png')).toContain('StartupWMClass=timedesk')
+  })
+
+  it('the AppImage gets a menu entry that starts it and shows the logo', () => {
+    const entry = linuxDesktopEntry('/home/sam/My Apps/timedesk.AppImage', linuxIconPath('/home/sam'))
+    expect(entry).toContain('Exec="/home/sam/My Apps/timedesk.AppImage" %U')
+    expect(entry).toContain('Icon=/home/sam/.local/share/icons/hicolor/512x512/apps/timedesk.png')
+    expect(entry).toContain('Name=timedesk')
+    expect(linuxDesktopEntryPath('/home/sam')).toBe('/home/sam/.local/share/applications/timedesk.desktop')
+  })
+
+  it('the installed .deb entry uses the same window name', () => {
+    const config = createRequire(import.meta.url)('../electron-builder.config.cjs') as { linux: { syncDesktopName?: boolean; desktop?: { entry?: Record<string, string> } } }
+    expect(config.linux.syncDesktopName).toBe(true)
+    expect(config.linux.desktop?.entry?.StartupWMClass).toBe(LINUX_WM_CLASS)
   })
 })

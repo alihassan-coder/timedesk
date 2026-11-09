@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { BrowserWindow, Notification, app, dialog, globalShortcut, ipcMain, nativeImage, net, powerMonitor, protocol, safeStorage, screen, session, shell } from 'electron'
 import { pathToFileURL } from 'node:url'
 import { resolveAppFile } from './app-files.ts'
-import { linuxAutostartEntry, linuxAutostartPath } from './autostart.ts'
+import { LINUX_WM_CLASS, linuxAutostartEntry, linuxAutostartPath, linuxDesktopEntry, linuxDesktopEntryPath, linuxIconPath } from './autostart.ts'
 import { DEFAULT_DESKTOP_SETTINGS, IPC, type AppInfo, type DesktopSettings, type TimerState, type UpdateStatus } from './bridge.ts'
 import { APP_ORIGIN, contentSecurityPolicy, isInternalUrl, isSafeExternalUrl, linuxOzonePlatform, resolveConfig } from './config.ts'
 import { pomodoroPhase, type FocusSession } from '@timedesk/shared'
@@ -23,6 +23,14 @@ const startHidden = process.argv.includes('--hidden')
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
 if (process.env.TIMEDESK_USER_DATA) app.setPath('userData', process.env.TIMEDESK_USER_DATA)
+// Linux docks show an app's icon by matching the window's name (WM_CLASS, taken from the app name) to timedesk.desktop.
+// The app name would otherwise be the package name "@timedesk/desktop", which matches nothing, so the dock showed a
+// generic gear. The data folder is kept exactly where it was, so settings and the saved login stay.
+if (process.platform === 'linux') {
+  const data = app.getPath('userData')
+  app.setName(LINUX_WM_CLASS)
+  app.setPath('userData', data)
+}
 app.setAppUserModelId(APP_ID) // needed for Windows notifications
 // AppImages cannot use Chromium's setuid sandbox, and newer Ubuntu restricts user namespaces, so the AppImage runs without it.
 // The .deb install keeps the sandbox.
@@ -69,7 +77,7 @@ function applyAutoStart() {
       const file = linuxAutostartPath(homedir())
       if (settings.autoStart) {
         mkdirSync(dirname(file), { recursive: true })
-        writeFileSync(file, linuxAutostartEntry(process.env.APPIMAGE ?? process.execPath))
+        writeFileSync(file, linuxAutostartEntry(process.env.APPIMAGE ?? process.execPath, process.env.APPIMAGE ? linuxIconPath(homedir()) : 'timedesk'))
       } else if (existsSync(file)) {
         unlinkSync(file)
       }
@@ -78,6 +86,34 @@ function applyAutoStart() {
     }
   } catch (e) {
     log(`auto start: ${(e as Error).message}`)
+  }
+}
+
+/**
+ * Linux AppImage: put a menu entry and the icon in the person's own folders, so the dock and the app menu show the
+ * timedesk logo (not a generic gear) and timedesk can be found in the menu. Rewritten only when something changed, for
+ * example after the AppImage file was moved. The .deb installs its own entry, so this is for the AppImage only.
+ */
+function integrateLinuxAppImage() {
+  const appImage = process.env.APPIMAGE
+  if (process.platform !== 'linux' || !appImage) return
+  try {
+    const home = homedir()
+    const icon = linuxIconPath(home)
+    const png = readFileSync(asset('icon.png'))
+    if (!existsSync(icon) || !readFileSync(icon).equals(png)) {
+      mkdirSync(dirname(icon), { recursive: true })
+      writeFileSync(icon, png)
+    }
+    const file = linuxDesktopEntryPath(home)
+    const entry = linuxDesktopEntry(appImage, icon)
+    if (!existsSync(file) || readFileSync(file, 'utf8') !== entry) {
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, entry)
+      log(`linux: menu entry written for ${appImage}`)
+    }
+  } catch (e) {
+    log(`linux: could not add the menu entry: ${(e as Error).message}`)
   }
 }
 
@@ -783,6 +819,7 @@ if (!app.requestSingleInstanceLock()) {
     })
     registerIpc(tray, updater)
     applyAutoStart()
+    integrateLinuxAppImage()
     createWindow()
     applyShortcuts()
     startTimers()

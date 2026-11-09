@@ -50,6 +50,11 @@ module.exports = {
   linux: {
     // The package is called @timedesk/desktop, which is not a valid program or package name on Linux, so name them explicitly.
     executableName: 'timedesk',
+    // Docks and taskbars (GNOME, KDE) show an app's icon by matching its window to its .desktop file. Electron names the
+    // window after desktopName in package.json ("timedesk"), so the installed file is timedesk.desktop with the same
+    // StartupWMClass. Without this the dock showed a generic gear icon instead of the timedesk logo.
+    syncDesktopName: true,
+    desktop: { entry: { StartupWMClass: 'timedesk', Icon: 'timedesk', Categories: 'Office;ProjectManagement;' } },
     icon: 'build/icon.png',
     category: 'Office',
     maintainer: 'timedesk <alihassan-coder@users.noreply.github.com>',

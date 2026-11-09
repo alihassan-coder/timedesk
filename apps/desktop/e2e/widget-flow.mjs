@@ -92,6 +92,12 @@ try {
       const rows = execFileSync('wmctrl', ['-lGp']).toString().split('\n').filter(Boolean).map((l) => l.trim().split(/\s+/))
       const mainRow = rows.find((p) => Number(p[2]) === app.pid && Number(p[5]) >= 600)
       if (mainRow) execFileSync('wmctrl', ['-i', '-a', mainRow[0]])
+      // The dock shows the timedesk logo only when the window's name matches timedesk.desktop (StartupWMClass=timedesk).
+      if (mainRow) {
+        const wmClass = execFileSync('xprop', ['-id', mainRow[0], 'WM_CLASS']).toString()
+        results.push('      main window ' + wmClass.trim())
+        if (!/"timedesk"/i.test(wmClass)) throw new Error('the window is not named timedesk, so docks show a generic icon: ' + wmClass.trim())
+      }
       await sleep(800)
     }
     await main.ev(`document.querySelector('[aria-label="Floating timer style"] [role=radio]').click()`)
