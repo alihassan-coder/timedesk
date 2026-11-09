@@ -2,7 +2,19 @@
 
 ## Unreleased
 
-Needs the backend update and database migrations `0004_reviews_and_completed`, `0005_focus_sessions` and `0006_multitask_and_custom_colors` (run `pnpm --filter @timedesk/db db:migrate` before the API goes live), and a new desktop release.
+Needs the backend update and database migrations `0004_reviews_and_completed`, `0005_focus_sessions`, `0006_multitask_and_custom_colors` and `0007_top_tasks` (run `pnpm --filter @timedesk/db db:migrate` before the API goes live), and a new desktop release.
+
+### Today's top 3
+- Pick the 3 tasks that matter most today: a card at the top of the dashboard with a tick box, Start and Stop for each, and "Pick a task" listing the most pressing ones first. Or click the star on any task
+- Tempo knows your top 3: plans put them first, summaries say how many you finished, and you can ask it to set them
+
+### Wrap up the day
+- One screen at the end of the day (dashboard button, sidebar, Ctrl+K, and a reminder on the dashboard after 4 pm): stop running timers, fill in the gaps, see what you tracked and finished, move what is left to tomorrow, and pick tomorrow's top 3
+- **Fill in the gaps:** the parts of the day no timer covered, with what they probably were: a meeting from your Google Calendar, the apps you used (desktop app tracking), or just "not tracked". The project is guessed from your history (which project you usually track while that app is in front). Pick a project or task and Add, or Skip. Also on the Timesheet for any day of the week
+- Time added this way works offline like everything else
+
+### Linux
+- The dock and taskbar show the timedesk logo instead of a generic gear icon. The AppImage adds itself to the app menu
 
 ### Works offline
 - Fixed: starting a timer, losing the internet and pressing Stop did not stop the timer. Every change (timer start and stop, tasks, projects) now happens on screen at once, is kept on this device, and goes to the server in order when there is a connection. Stop records the moment you pressed it, not when the internet came back

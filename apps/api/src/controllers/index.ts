@@ -69,6 +69,7 @@ export function createControllers(s: Services) {
         return c.json({ entry: entries[0] ?? null, entries })
       },
       start: async (c: C) => c.json({ entry: await s.time.start(c.get('user'), await parseBody(c, v.startTimer)) }, 201),
+      add: async (c: C) => c.json({ entry: await s.time.add(c.get('user'), await parseBody(c, v.createEntry)) }, 201),
       stop: async (c: C) => c.json({ entry: await s.time.stop(c.get('user').id, await parseBody(c, v.stopTimer)) }),
     },
 
@@ -76,6 +77,7 @@ export function createControllers(s: Services) {
       ingest: async (c: C) => c.json(await s.activity.ingest(c.get('user').id, await parseBody(c, v.activityBatch)), 201),
       summary: async (c: C) => c.json(await s.activity.summary(c.get('user').id, parseQuery(c, v.timeRange))),
       sessions: async (c: C) => c.json(await s.activity.sessions(c.get('user').id, parseQuery(c, v.activitySessionsQuery))),
+      timeline: async (c: C) => c.json(await s.activity.timeline(c.get('user').id, parseQuery(c, v.timelineRange))),
       removeOne: async (c: C) => {
         await s.activity.removeOne(c.get('user').id, parseParams(c, v.idParam).id)
         return c.body(null, 204)

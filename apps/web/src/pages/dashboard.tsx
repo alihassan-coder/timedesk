@@ -1,8 +1,8 @@
 import { Link } from 'react-router'
-import { CalendarRange, NotebookPen, Sparkles, Sunrise } from 'lucide-react'
+import { CalendarRange, NotebookPen, Sparkles, Sunrise, MoonStar } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, XAxis } from 'recharts'
 import { useMemo } from 'react'
-import { dailyTotals, dueBucket, formatHours, overlapMs, periodStart, type TimeEntry } from '@timedesk/shared'
+import { dailyTotals, dueBucket, formatHours, overlapMs, periodStart, toDateKey, type TimeEntry } from '@timedesk/shared'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,6 +11,8 @@ import { useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
 import { FocusSummaryCard } from '@/features/focus'
 import { TaskRow } from '@/features/task-row'
+import { TopTasksCard } from '@/features/top-tasks'
+import { wrappedUp } from '@/lib/wrap-up'
 import { askTempoLink, TEMPO_PROMPTS } from '@/features/assistant/tempo-prompts'
 import { useProfile } from '@/lib/auth-client'
 import { projectColor } from '@/lib/project-colors'
@@ -78,9 +80,14 @@ export default function Dashboard() {
         title={`${greeting(new Date(now).getHours())}${firstName ? `, ${firstName}` : ''}`}
         description={new Date(now).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         actions={
-          <Button variant="outline" render={<Link to="/tasks" />}>
-            Add task
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" render={<Link to="/wrap-up" />}>
+              <MoonStar /> Wrap up the day
+            </Button>
+            <Button variant="outline" render={<Link to="/tasks" />}>
+              Add task
+            </Button>
+          </div>
         }
       />
 
@@ -101,6 +108,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       )}
+
+      {!isNew && <WrapUpNudge now={now} />}
+      {!isNew && <TopTasksCard today={toDateKey(now)} />}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => (
@@ -213,6 +223,24 @@ function LiveToday({ tracked, yesterday }: { tracked: TimeEntry[]; yesterday: nu
         {yesterday === 0 ? ' ' : `${today >= yesterday ? '+' : '-'}${formatHours(Math.abs(today - yesterday))} vs yesterday`}
       </span>
     </span>
+  )
+}
+
+/** In the evening, a gentle reminder to wrap up the day (until it is done). */
+function WrapUpNudge({ now }: { now: number }) {
+  const { user } = useProfile()
+  const hour = new Date(now).getHours()
+  if (hour < 16 || !user || wrappedUp(user.id, toDateKey(now))) return null
+  return (
+    <div className="bg-primary/5 border-primary/30 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3">
+      <MoonStar className="text-primary size-5" />
+      <p className="flex-1 text-sm">
+        <span className="font-medium">Time to wrap up?</span> Two minutes: fill in what was not tracked, move what is left, and pick tomorrow&apos;s top 3.
+      </p>
+      <Button size="sm" render={<Link to="/wrap-up" />}>
+        Wrap up the day
+      </Button>
+    </div>
   )
 }
 

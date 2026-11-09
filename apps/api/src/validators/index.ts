@@ -45,6 +45,9 @@ const taskFields = {
   priority: z.enum(['low', 'medium', 'high']),
   due: dateKey.nullable(),
   recurrence: recurrence.nullable(),
+  /** One of a day's top 3: the day and the place (1 to 3), or null for neither. */
+  topDay: dateKey.nullable(),
+  topRank: z.number().int().min(1).max(3).nullable(),
 }
 export const createTask = z.object({
   id: z.string().min(1).optional(),
@@ -54,6 +57,8 @@ export const createTask = z.object({
   priority: taskFields.priority.default('medium'),
   due: taskFields.due.default(null),
   recurrence: taskFields.recurrence.default(null),
+  topDay: taskFields.topDay.default(null),
+  topRank: taskFields.topRank.default(null),
 })
 export const updateTask = z.object(taskFields).partial()
 export const taskQuery = z.object({ status: z.enum(['todo', 'in_progress', 'done']).optional() })
@@ -70,6 +75,18 @@ export const startTimer = z.object({
   startedAt: z.coerce.date().optional(),
   parallel: z.boolean().default(false),
 })
+/** Time added afterwards (filling a gap in the day): a finished entry with its own start and end. Safe to send twice. */
+export const createEntry = z
+  .object({
+    id: z.string().min(8).max(64),
+    taskId: z.string().nullable().default(null),
+    projectId: z.string().nullable().default(null),
+    startedAt: z.coerce.date(),
+    endedAt: z.coerce.date(),
+  })
+  .refine((e) => e.endedAt > e.startedAt && e.endedAt.getTime() - e.startedAt.getTime() <= 24 * 3_600_000, 'The end must be after the start, within a day.')
+export type CreateEntry = z.infer<typeof createEntry>
+
 /**
  * Stopping. With `id`, that timer (safe to send twice); without, every running timer. `endedAt` names the moment the
  * work really ended (for example when the person went idle, or pressed stop while offline).
@@ -120,6 +137,11 @@ export const activitySessionsQuery = z.object({
   page: z.coerce.number().int().min(1).max(100_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(10),
 })
+
+/** One day (or two, around midnight) of app use. */
+export const timelineRange = z
+  .object({ from: z.coerce.date(), to: z.coerce.date() })
+  .refine((r) => r.to > r.from && r.to.getTime() - r.from.getTime() <= 2 * 86_400_000, 'Ask for up to two days.')
 
 export const activityBatch = z.object({
   samples: z

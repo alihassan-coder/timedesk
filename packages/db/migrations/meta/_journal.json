@@ -50,6 +50,13 @@
       "when": 1794201184987,
       "tag": "0006_multitask_and_custom_colors",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794207173715,
+      "tag": "0007_top_tasks",
+      "breakpoints": true
     }
   ]
 }

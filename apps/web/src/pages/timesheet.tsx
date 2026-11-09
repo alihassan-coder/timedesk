@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { formatHours, overlapMs, splitParallel, type Project, type TimeEntry } from '@timedesk/shared'
+import { ChevronLeft, ChevronRight, ListPlus } from 'lucide-react'
+import { formatHours, overlapMs, splitParallel, toDateKey, type Project, type TimeEntry } from '@timedesk/shared'
+import { SimpleSelect } from '@/components/simple-select'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { FillGaps } from '@/features/fill-gaps'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -66,6 +69,7 @@ export default function TimesheetPage() {
         description="Hours per project per day."
         actions={
           <>
+            <FillGapsDialog days={days.map((d) => toDateKey(d.start)).filter((k) => k <= toDateKey(Date.now()))} />
             <Button size="icon" variant="outline" aria-label="Previous week" onClick={() => setOffset(offset + 1)}>
               <ChevronLeft />
             </Button>
@@ -124,5 +128,34 @@ export default function TimesheetPage() {
         </Table>
       </div>
     </>
+  )
+}
+
+/** Fill in the untracked parts of a day of the week shown (today by default). */
+function FillGapsDialog({ days }: { days: string[] }) {
+  const [day, setDay] = useState(days[days.length - 1] ?? toDateKey(Date.now()))
+  const shown = days.includes(day) ? day : days[days.length - 1]
+  if (!shown) return null
+  return (
+    <Dialog>
+      <DialogTrigger render={<Button variant="outline" />}>
+        <ListPlus /> Fill in gaps
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Fill in the gaps</DialogTitle>
+          <DialogDescription>Time that no timer covered, and what it probably was. Add it to a project, or skip it.</DialogDescription>
+        </DialogHeader>
+        <SimpleSelect
+          className="w-56"
+          value={shown}
+          onChange={setDay}
+          options={days.map((k) => ({ value: k, label: new Date(`${k}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }) }))}
+        />
+        <div className="max-h-[60vh] overflow-y-auto">
+          <FillGaps key={shown} day={shown} />
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

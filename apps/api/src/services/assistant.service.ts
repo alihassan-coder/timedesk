@@ -309,6 +309,12 @@ export function createAssistantService(p: Parts) {
     const projectsBrief = (rows: { name: string; ms: number }[]) => rows.map((r) => ({ project: r.name, time: formatHours(r.ms) }))
     const openTitles = (tasks: DigestTask[], buckets: string[], day: string) =>
       tasks.filter((t) => t.status !== 'done' && buckets.includes(dueBucketOn(t.due, day))).map((t) => t.title)
+    /** The person's top 3 for a day, in order, with whether each is done. */
+    const topTasks = async (day: string) =>
+      (await p.tasks.list(user.id))
+        .filter((t) => t.topDay === day)
+        .sort((a, b) => (a.topRank ?? 9) - (b.topRank ?? 9))
+        .map((t) => ({ title: t.title, done: t.status === 'done' }))
     const runningNow = async () => {
       const e = await p.time.running(user.id)
       if (!e) return null
@@ -319,7 +325,7 @@ export function createAssistantService(p: Parts) {
     const tools = {
       daily_summary: tool({
         description:
-          'Facts for a summary of one day: time tracked (total, by project, compared with the day before), tasks finished, what is still due, the daily goal, the apps used most, and focus (Focus guard score, interruptions, top distractions) when the desktop app measured it. Use it for "summarize my day", "how did today go" or "what did I do yesterday".',
+          'Facts for a summary of one day: the user\'s top 3 and whether they were done, time tracked (total, by project, compared with the day before), tasks finished, what is still due, the daily goal, the apps used most, and focus (Focus guard score, interruptions, top distractions) when the desktop app measured it. Use it for "summarize my day", "how did today go" or "what did I do yesterday".',
         inputSchema: z.object({ date: dateKey.optional().describe('The day. Defaults to today') }),
         execute: async ({ date }) => {
           const day = date ?? today()
@@ -342,6 +348,7 @@ export function createAssistantService(p: Parts) {
             stillDueToday: openTitles(data.tasks, ['today'], day),
             overdue: openTitles(data.tasks, ['overdue'], day),
             dueTomorrow: openTitles(data.tasks, ['today'], addDays(day, 1)),
+            topTasks: await topTasks(day),
             topApps: await topApps(d.start, d.end),
             focus: await focusFacts(d.start, d.end),
             ...(isToday ? { timerRunning: await runningNow() } : {}),
@@ -388,7 +395,7 @@ export function createAssistantService(p: Parts) {
 
       plan_day: tool({
         description:
-          'Facts to plan a day: the open tasks that most need attention (in order, with the reason), calendar events that day when Google Calendar is connected, time already tracked, the daily goal and the current time. Use it for "plan my day", "what should I work on". Then propose a short schedule. Do not create calendar events or change tasks unless the user asks.',
+          'Facts to plan a day: the user\'s own top 3 for that day (put them first), the open tasks that most need attention (in order, with the reason), calendar events that day when Google Calendar is connected, time already tracked, the daily goal and the current time. Use it for "plan my day", "what should I work on". Then propose a short schedule. Do not create calendar events or change tasks unless the user asks.',
         inputSchema: z.object({ date: dateKey.optional().describe('The day to plan. Defaults to today') }),
         execute: async ({ date }) => {
           const day = date ?? today()
@@ -414,6 +421,7 @@ export function createAssistantService(p: Parts) {
             timeZone,
             ...(isToday ? { currentTime: `${String(zonedHour(now().getTime(), timeZone)).padStart(2, '0')}:00 (plan from now on)` } : {}),
             trackedSoFar: formatHours(g.totalMs),
+            topTasks: await topTasks(day),
             dailyGoal: goal > 0 ? formatHours(goal * 60_000) : 'off',
             leftForGoal: goal > 0 ? formatHours(Math.max(0, goal * 60_000 - g.totalMs)) : null,
             typicalDay: workedDays.length ? formatHours(workedDays.reduce((s, x) => s + x.ms, 0) / workedDays.length) : 'no history yet',
@@ -468,6 +476,8 @@ export function createAssistantService(p: Parts) {
             status: 'todo',
             due: due ?? null,
             recurrence: repeat ? { freq: repeat } : null,
+            topDay: null,
+            topRank: null,
           })
           return { created: await brief(row) }
         },
@@ -517,6 +527,29 @@ export function createAssistantService(p: Parts) {
           if (isMiss(found)) return found
           await p.tasks.remove(user.id, found.task.id)
           return { deleted: found.task.title }
+        },
+      }),
+
+      set_top_tasks: tool({
+        description:
+          'Set the user\'s top 3 tasks for a day (their most important tasks, shown at the top of the dashboard). Replaces that day\'s list. Use when they ask to pick, set or change their top 3, or accept your suggested plan.',
+        inputSchema: z.object({
+          tasks: z.array(z.string().trim().min(1)).max(3).describe('Up to 3 task ids from list_tasks, or exact titles, most important first. An empty list clears the day'),
+          day: dateKey.optional().describe('Defaults to today'),
+        }),
+        execute: async ({ tasks: refs, day: dayArg }) => {
+          const day = dayArg ?? today()
+          const found: TaskRow[] = []
+          for (const ref of refs) {
+            const r = await pickTask(ref)
+            if (isMiss(r)) return r
+            if (!found.some((t) => t.id === r.task.id)) found.push(r.task)
+          }
+          for (const t of (await p.tasks.list(user.id)).filter((t) => t.topDay === day && !found.some((x) => x.id === t.id))) {
+            await p.tasks.update(user.id, t.id, { topDay: null, topRank: null })
+          }
+          for (const [i, t] of found.entries()) await p.tasks.update(user.id, t.id, { topDay: day, topRank: i + 1 })
+          return { day, top: found.map((t) => t.title) }
         },
       }),
 

@@ -271,6 +271,8 @@ const toTask = (t: ApiTask): Task => ({
   recurrence: t.recurrence,
   createdAt: new Date(t.createdAt).getTime(),
   completedAt: t.completedAt ? new Date(t.completedAt).getTime() : null,
+  topDay: t.topDay ?? null,
+  topRank: t.topRank ?? null,
 })
 const toProject = (p: Project): Project => ({ id: p.id, name: p.name, description: p.description, color: p.color, customColor: p.customColor ?? null })
 const toEntry = (e: ApiEntry): TimeEntry => ({
@@ -444,6 +446,40 @@ export const actions = {
     if (opts.parallel && runningEntries(state.entries).some((e) => e.taskId === taskId && e.projectId === projectId)) return
     const entry: TimeEntry = { id: crypto.randomUUID(), taskId, projectId, startedAt: opts.at ?? Date.now(), endedAt: null }
     commit({ kind: 'timer.start', entry, parallel: !!opts.parallel })
+  },
+
+  /**
+   * Puts a task in a day's top 3 (in the first free place), or takes it out (day null). Returns false when the day
+   * already has 3. Works offline like every other change.
+   */
+  setTop(taskId: string, day: string | null): boolean {
+    const task = state.tasks.find((t) => t.id === taskId)
+    if (!task) return false
+    if (day === null) {
+      if (task.topDay) commit({ kind: 'task.update', id: taskId, patch: { topDay: null, topRank: null }, at: Date.now() })
+      return true
+    }
+    if (task.topDay === day) return true
+    const taken = new Set(state.tasks.filter((t) => t.topDay === day && t.id !== taskId).map((t) => t.topRank))
+    const rank = [1, 2, 3].find((r) => !taken.has(r))
+    if (!rank) return false
+    commit({ kind: 'task.update', id: taskId, patch: { topDay: day, topRank: rank }, at: Date.now() })
+    return true
+  },
+
+  /** Moves tasks to another day (for example the open ones to tomorrow at the end of the day). */
+  moveTo(taskIds: string[], due: string) {
+    for (const id of taskIds) if (state.tasks.some((t) => t.id === id && t.due !== due)) actions.updateTask(id, { due })
+  },
+
+  /** Adds time afterwards, with its start and end, for example to fill a gap in the day. Works offline. */
+  addEntry(input: { startedAt: number; endedAt: number; taskId?: string | null; projectId?: string | null }) {
+    if (!(input.endedAt > input.startedAt)) return null
+    const taskId = input.taskId ?? null
+    const projectId = input.projectId ?? state.tasks.find((t) => t.id === taskId)?.projectId ?? null
+    const entry: TimeEntry = { id: crypto.randomUUID(), taskId, projectId, startedAt: input.startedAt, endedAt: input.endedAt }
+    commit({ kind: 'entry.create', entry })
+    return entry.id
   },
 
   /** Stops one timer (by id), or every running timer, now or at `at` (ms), for example when the person went idle. */

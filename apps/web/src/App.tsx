@@ -25,6 +25,7 @@ const SettingsPage = lazy(pages.settings)
 const TasksPage = lazy(pages.tasks)
 const TimesheetPage = lazy(pages.timesheet)
 const WidgetPage = lazy(pages.widget)
+const WrapUpPage = lazy(pages.wrapUp)
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
                 <Route path="tasks" element={<TasksPage />} />
                 <Route path="projects" element={<ProjectsPage />} />
                 <Route path="timesheet" element={<TimesheetPage />} />
+                <Route path="wrap-up" element={<WrapUpPage />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="review" element={<ReviewPage />} />
                 <Route path="apps" element={<AppsPage />} />

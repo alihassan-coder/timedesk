@@ -35,12 +35,14 @@ export function createRoutes(c: Controllers) {
 
   r.get('/time-entries', c.time.list)
   r.get('/time-entries/running', c.time.running)
+  r.post('/time-entries', c.time.add)
   r.post('/time-entries/start', c.time.start)
   r.post('/time-entries/stop', c.time.stop)
 
   r.post('/activity', c.activity.ingest)
   r.get('/activity/summary', c.activity.summary)
   r.get('/activity/sessions', c.activity.sessions)
+  r.get('/activity/timeline', c.activity.timeline)
   r.delete('/activity/:id', c.activity.removeOne)
   r.delete('/activity', c.activity.clear)
 

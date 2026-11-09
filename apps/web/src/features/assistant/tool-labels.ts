@@ -21,6 +21,7 @@ export const TOOL_LABELS: Record<string, string> = {
   weekly_review: 'Read your week',
   plan_day: 'Looked at your tasks and calendar',
   ask_user: 'Asked you',
+  set_top_tasks: 'Set your top 3',
 }
 
 /** The same, while it is still running or waiting. */

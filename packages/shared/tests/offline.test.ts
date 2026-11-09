@@ -148,3 +148,19 @@ describe('several timers at once', () => {
     expect(dailyTotals(list, T0 + 4 * H, 1)[0].ms).toBeCloseTo(3 * H)
   })
 })
+
+describe('end of the day', () => {
+  it('time added afterwards appears at once, is sent with its start and end, and is safe to replay', () => {
+    const op = { kind: 'entry.create', entry: entry('fill-1', T0, T0 + H, { projectId: 'p' }) } as const
+    const once = applyOp(empty, op)
+    expect(once.entries).toEqual([entry('fill-1', T0, T0 + H, { projectId: 'p' })])
+    expect(applyOp(once, op)).toEqual(once)
+    expect(opRequest(op)).toEqual({ method: 'POST', path: '/time-entries', body: { id: 'fill-1', taskId: null, projectId: 'p', startedAt: '2026-11-09T09:00:00.000Z', endedAt: '2026-11-09T10:00:00.000Z' } })
+    expect(failureAction(op, 409)).toBe('done')
+  })
+
+  it("picking a task for a day's top 3 is an ordinary task change, so it works offline too", () => {
+    const d = applyOp({ ...empty, tasks: [task('t')] }, { kind: 'task.update', id: 't', patch: { topDay: '2026-11-10', topRank: 1 }, at: T0 })
+    expect(d.tasks[0]).toMatchObject({ topDay: '2026-11-10', topRank: 1 })
+  })
+})

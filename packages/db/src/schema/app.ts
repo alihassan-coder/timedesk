@@ -49,6 +49,9 @@ export const tasks = pgTable(
     recurrence: jsonb('recurrence').$type<{ freq: 'daily' | 'weekly' | 'monthly' | 'custom'; every?: number } | null>(),
     /** When the task was marked done. Cleared when it is reopened. Used for summaries and reviews. */
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    /** One of a day's top 3: the day (YYYY-MM-DD) and its place, 1 to 3. */
+    topDay: text('top_day'),
+    topRank: integer('top_rank'),
     ...stamps,
   },
   (t) => [index('tasks_workspace_idx').on(t.workspaceId), index('tasks_user_status_idx').on(t.userId, t.status)],

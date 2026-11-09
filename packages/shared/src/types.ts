@@ -36,7 +36,13 @@ export interface Task {
   createdAt: number // epoch ms
   /** When it was marked done (epoch ms), or null while it is open. */
   completedAt: number | null
+  /** One of the day's top 3: the day (YYYY-MM-DD) and its place (1 to 3). Null when it is not picked. */
+  topDay?: string | null
+  topRank?: number | null
 }
+
+/** How many tasks a day's top list holds. */
+export const TOP_TASKS = 3
 
 /** One tracked block of time. endedAt === null means the timer is running. */
 export interface TimeEntry {

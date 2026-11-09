@@ -19,6 +19,7 @@ export const pages = {
   tasks: () => import('@/pages/tasks'),
   timesheet: () => import('@/pages/timesheet'),
   widget: () => import('@/pages/widget'),
+  wrapUp: () => import('@/pages/wrap-up'),
 }
 
 let prefetched = false

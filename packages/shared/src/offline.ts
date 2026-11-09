@@ -15,7 +15,7 @@ export interface OfflineData {
   entries: TimeEntry[]
 }
 
-export type TaskPatch = Partial<Pick<Task, 'title' | 'due' | 'priority' | 'projectId' | 'status' | 'recurrence'>>
+export type TaskPatch = Partial<Pick<Task, 'title' | 'due' | 'priority' | 'projectId' | 'status' | 'recurrence' | 'topDay' | 'topRank'>>
 export type ProjectPatch = Partial<Pick<Project, 'name' | 'description' | 'color' | 'customColor'>>
 
 export type Op =
@@ -28,6 +28,8 @@ export type Op =
   /** `parallel`: keep the timers that are already running (multitasking). Otherwise they stop when this one starts. */
   | { kind: 'timer.start'; entry: TimeEntry; parallel: boolean }
   | { kind: 'timer.stop'; id: string; endedAt: number }
+  /** Time added afterwards, with its start and end (for example filling a gap in the day). */
+  | { kind: 'entry.create'; entry: TimeEntry }
 
 export interface QueuedOp {
   /** Unique per operation, so the outbox can remove exactly the one that was sent. */
@@ -80,6 +82,8 @@ export function applyOp(d: OfflineData, op: Op): OfflineData {
     }
     case 'timer.stop':
       return { ...d, entries: d.entries.map((e) => (e.id === op.id && e.endedAt === null ? { ...e, endedAt: Math.max(e.startedAt, op.endedAt) } : e)) }
+    case 'entry.create':
+      return d.entries.some((e) => e.id === op.entry.id) ? d : { ...d, entries: [...d.entries, op.entry] }
   }
 }
 
@@ -121,6 +125,10 @@ export function opRequest(op: Op): OpRequest {
       }
     case 'timer.stop':
       return { method: 'POST', path: '/time-entries/stop', body: { id: op.id, endedAt: iso(op.endedAt) } }
+    case 'entry.create': {
+      const e = op.entry
+      return { method: 'POST', path: '/time-entries', body: { id: e.id, taskId: e.taskId, projectId: e.projectId, startedAt: iso(e.startedAt), endedAt: iso(e.endedAt ?? e.startedAt) } }
+    }
   }
 }
 
@@ -136,7 +144,7 @@ export function failureAction(op: Op, status: number | null): 'retry' | 'signin'
   if (status === 401) return 'signin'
   // Deleting something that is already gone, or updating something deleted elsewhere: nothing left to do.
   if (status === 404 && (op.kind.endsWith('.delete') || op.kind === 'task.update' || op.kind === 'project.update' || op.kind === 'timer.stop')) return 'done'
-  if (status === 409 && (op.kind === 'task.create' || op.kind === 'project.create' || op.kind === 'timer.start')) return 'done'
+  if (status === 409 && (op.kind === 'task.create' || op.kind === 'project.create' || op.kind === 'timer.start' || op.kind === 'entry.create')) return 'done'
   return 'drop'
 }
 
@@ -164,5 +172,7 @@ export function describeOp(op: Op, data: OfflineData): string {
       return 'starting the timer'
     case 'timer.stop':
       return 'stopping the timer'
+    case 'entry.create':
+      return 'adding time'
   }
 }

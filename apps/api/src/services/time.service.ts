@@ -2,7 +2,7 @@ import { and, desc, eq, gte, isNull, lt, lte, sql } from 'drizzle-orm'
 import { schema, type Db } from '@timedesk/db'
 import { AppError, conflict, notFound } from '../utils/errors.ts'
 import type { SessionUser } from '../types.ts'
-import type { StartTimer } from '../validators/index.ts'
+import type { CreateEntry, StartTimer } from '../validators/index.ts'
 
 const e = schema.timeEntries
 
@@ -24,6 +24,18 @@ export function createTimeService(db: Db) {
     if (!at) return now
     if (at.getTime() < now.getTime() - MAX_BACKDATE_MS) throw new AppError(422, 'That time is more than 30 days ago.')
     return at.getTime() > now.getTime() ? now : at
+  }
+
+  /** This person's own (not deleted) task and project, so an entry never points at someone else's. */
+  async function owned(userId: string, taskId: string | null, projectId: string | null) {
+    const ownTask = taskId
+      ? (await db.select({ id: schema.tasks.id, projectId: schema.tasks.projectId }).from(schema.tasks).where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId), isNull(schema.tasks.deletedAt))))[0]
+      : undefined
+    const ownProject = projectId
+      ? (await db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId), isNull(schema.projects.deletedAt))))[0]
+      : undefined
+    // A task's time counts for its project when no project is named.
+    return { taskId: ownTask?.id ?? null, projectId: ownProject?.id ?? ownTask?.projectId ?? null }
   }
 
   return {
@@ -56,12 +68,7 @@ export function createTimeService(db: Db) {
       // A timer on a task counts for that task's project when no project is named (Tempo and scripts often name only the task).
       // Only this person's own (not deleted) task and project. Something else, or something deleted on another device
       // while this one was offline, is left out rather than refused, so the tracked time is never lost.
-      const ownTask = input.taskId
-        ? (await db.select({ id: schema.tasks.id, projectId: schema.tasks.projectId }).from(schema.tasks).where(and(eq(schema.tasks.id, input.taskId), eq(schema.tasks.userId, user.id), isNull(schema.tasks.deletedAt))))[0]
-        : undefined
-      const ownProject = input.projectId
-        ? (await db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, user.id), isNull(schema.projects.deletedAt))))[0]
-        : undefined
+      const own = await owned(user.id, input.taskId, input.projectId)
       if (!input.parallel) {
         // Switching: the timers that were running before this one stop at the moment it started. A timer started
         // later on another device keeps running (both then share that time).
@@ -72,8 +79,27 @@ export function createTimeService(db: Db) {
       }
       const [row] = await db
         .insert(e)
-        .values({ id: input.id ?? crypto.randomUUID(), userId: user.id, workspaceId: user.id, taskId: ownTask?.id ?? null, projectId: ownProject?.id ?? ownTask?.projectId ?? null, startedAt })
+        .values({ id: input.id ?? crypto.randomUUID(), userId: user.id, workspaceId: user.id, ...own, startedAt })
         .returning()
+      return row
+    },
+
+    /**
+     * Adds time afterwards, with its start and end (filling a gap in the day). Safe to send twice: the same id returns
+     * the entry already there. It may overlap other time; overlapping time is shared in totals, never counted twice.
+     */
+    async add(user: SessionUser, input: CreateEntry) {
+      const now = new Date()
+      const [same] = await db.select().from(e).where(eq(e.id, input.id))
+      if (same) {
+        if (same.userId !== user.id) throw conflict('That id is already used.')
+        return same
+      }
+      const startedAt = fromDevice(input.startedAt, now)
+      const endedAt = fromDevice(input.endedAt, now)
+      if (endedAt <= startedAt) throw new AppError(422, 'The end must be after the start.')
+      const own = await owned(user.id, input.taskId, input.projectId)
+      const [row] = await db.insert(e).values({ id: input.id, userId: user.id, workspaceId: user.id, ...own, startedAt, endedAt }).returning()
       return row
     },
 

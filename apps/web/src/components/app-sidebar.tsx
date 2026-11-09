@@ -17,6 +17,7 @@ import {
   Sparkles,
   Sun,
   Table2,
+  MoonStar,
 } from 'lucide-react'
 import { LogoMark, Wordmark } from '@/components/logo'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -58,6 +59,7 @@ const ICONS = {
   tasks: ListChecks,
   projects: FolderKanban,
   timesheet: Table2,
+  wrapup: MoonStar,
   reports: BarChart3,
   review: CalendarCheck,
   apps: Monitor,

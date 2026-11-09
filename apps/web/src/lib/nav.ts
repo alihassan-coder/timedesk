@@ -3,6 +3,7 @@ export type NavIcon =
   | 'tasks'
   | 'projects'
   | 'timesheet'
+  | 'wrapup'
   | 'reports'
   | 'review'
   | 'apps'
@@ -28,6 +29,7 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
       { to: '/tasks', label: 'Tasks', icon: 'tasks' },
       { to: '/projects', label: 'Projects', icon: 'projects' },
       { to: '/timesheet', label: 'Timesheet', icon: 'timesheet' },
+      { to: '/wrap-up', label: 'Wrap up the day', icon: 'wrapup' },
     ],
   },
   {

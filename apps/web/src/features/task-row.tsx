@@ -13,6 +13,7 @@ import {
 import { actions, useStore } from '@/data/store'
 import { dueLabel, PRIORITY_LABEL, STATUS_LABEL } from '@/features/task-labels'
 import { ProjectDot } from '@/components/project-dot'
+import { TopStar } from '@/features/top-tasks'
 import { cn } from '@/lib/utils'
 
 const PRIORITY_VARIANT = { low: 'outline', medium: 'secondary', high: 'destructive' } as const
@@ -94,6 +95,7 @@ function TaskRowView({ task, today, project, showProject }: { task: Task; today:
           {dueLabel(task.due, at)}
         </span>
       )}
+      <TopStar task={task} today={today} />
       <StatusMenu task={task} />
     </li>
   )
