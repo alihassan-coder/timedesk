@@ -121,6 +121,11 @@ async function seed() {
     await call('POST', '/time-entries/stop', { id: 'demo-today-0-entry', endedAt: new Date(morningEnd).toISOString() })
   }
   await call('POST', '/time-entries/start', { id: 'demo-today-1-entry', taskId: tasks['Homepage hero section'].id, startedAt: new Date(Date.now() - 1.3 * H1).toISOString() })
+  // Today's top 3, one already done.
+  for (const [i, title] of ['Homepage hero section', 'Logo variations', 'Send November invoices'].entries()) {
+    await call('PATCH', `/tasks/${tasks[title].id}`, { topDay: plusDays(0), topRank: i + 1 })
+  }
+  await call('PATCH', `/tasks/${tasks['Send November invoices'].id}`, { status: 'done' })
   await call('PUT', '/ai/keys/openai', { key: 'sk-demo-0000000000000000' })
   await call('POST', '/focus/sessions', {
     sessions: [
@@ -202,6 +207,12 @@ try {
   await waitFor(bodyHas('Running now'), 'menu open')
   await shot('multitask')
   await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+
+  // Wrap up the day (with the morning's untracked hour as a suggestion).
+  await goto('/wrap-up')
+  await waitFor(bodyHas('Fill in the gaps'), 'wrap-up')
+  await sleep(1500)
+  await shot('wrap-up')
 
   // Dark mode.
   await goto('/')

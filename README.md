@@ -17,6 +17,7 @@ Time tracking, todos and an AI assistant for a small team. One web app, a Window
 | Area | Features |
 |---|---|
 | **Plan** | Projects, tasks with status, priority, due date and recurrence (daily, weekly, monthly, custom), due-date groups (overdue, today, tomorrow, this week, later), list, board, day, week and month views, drag and drop to reschedule or change status, edit and delete projects |
+| **Focus your day** | **Today's top 3:** pick the few tasks that matter most, at the top of the dashboard. **Wrap up the day:** stop timers, fill in what was not tracked (meetings from your calendar, apps you used, with the project guessed from your history), move what is left to tomorrow and pick tomorrow's top 3 |
 | **Track** | Timer in the top bar, stopwatch, weekly timesheet. **Multitasking:** run several timers at once; overlapping time is shared between them, so your day still adds up to the clock |
 | **Offline** | Every change is saved on your device first and synced in order when you are online, with the time you really pressed the button. The app opens without a connection. A badge shows what is still waiting |
 | **Understand** | Dashboard with charts, reports by day, month, quarter, year and any custom date range, weekly review |
@@ -39,8 +40,8 @@ Time tracking, todos and an AI assistant for a small team. One web app, a Window
 | **Reports:** by day, month, quarter, year or any range | **Multitasking:** track a second task alongside, stop each on its own |
 | ![Tempo asks for approval before deleting a task](docs/media/tempo-approval.png) | ![Picking any colour for a project](docs/media/project-colours.png) |
 | **Tempo asks first:** nothing is deleted until you allow it | **Project colours:** 12 presets or any colour |
-
-![The dashboard in dark mode](docs/media/dashboard-dark.png)
+| ![Wrap up the day: stop timers, fill in the gaps, what you did, move what is left](docs/media/wrap-up.png) | ![The dashboard in dark mode](docs/media/dashboard-dark.png) |
+| **Wrap up the day:** two minutes, and tomorrow starts with a plan | **Dark mode** |
 
 <sub>Pictures made from made-up demo data by `apps/web/e2e/capture-readme.mjs`.</sub>
 
@@ -110,7 +111,7 @@ After signing in, add an AI key under **Settings -> AI assistant** to use Tempo.
 ## Testing
 
 - **Unit and integration (`pnpm test`):** the API is tested through its real HTTP interface on an in-memory Postgres (PGlite) with the real migrations: registration and approval, privacy between users, tasks, time, chats, settings, activity, encrypted keys, the AI agent with a mock model, security headers. Shared logic and the desktop logic have their own tests.
-- **Browser end-to-end (real Chrome):** `apps/web/e2e/` has `auth-flow`, `data-flow`, `tasks-flow` (day/week/month views, drag and drop, projects, model picker), `lists-flow` (markdown, custom-date reports, paged app list), `assistant-flow`, `timer-flow`, `tempo-account-flow` (briefings, export, delete account), `tempo-approval-flow` (Allow / Don't allow, questions) and `offline-flow` (stop a timer offline, reload offline, sync with the right times, multitasking). They drive the real UI against a throwaway API. **They refuse to run against anything but the in-memory API**, so they can never touch a real database. How to run them is at the top of each file.
+- **Browser end-to-end (real Chrome):** `apps/web/e2e/` has `auth-flow`, `data-flow`, `tasks-flow` (day/week/month views, drag and drop, projects, model picker), `lists-flow` (markdown, custom-date reports, paged app list), `assistant-flow`, `timer-flow`, `end-of-day-flow` (top 3, fill in the gaps, wrap up), `tempo-account-flow` (briefings, export, delete account), `tempo-approval-flow` (Allow / Don't allow, questions) and `offline-flow` (stop a timer offline, reload offline, sync with the right times, multitasking). They drive the real UI against a throwaway API. **They refuse to run against anything but the in-memory API**, so they can never touch a real database. How to run them is at the top of each file.
 - **Desktop end-to-end (real Electron window):** `apps/desktop/e2e/desktop-flow.mjs`, `focus-flow.mjs` (Focus guard, with a fake window in front so it never reads the real desktop) and `packaged-smoke.mjs`.
 
 ## Deploy

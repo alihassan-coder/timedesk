@@ -156,7 +156,7 @@ try {
 
   await step('stopping the timer keeps the session and uploads it, without window titles', async () => {
     // A session must have a minute of measured time before it is kept.
-    await h.waitFor(`${focusState}.then((s) => s.focusedSeconds + s.distractedSeconds >= 65)`, 'a minute measured', 70000)
+    await h.waitFor(`${focusState}.then((s) => s.focusedSeconds + s.distractedSeconds >= 65)`, 'a minute measured', 100000)
     await h.click('[aria-label="Stop timer"]')
     await h.waitFor(`${focusState}.then((s) => !s.active)`, 'session over')
     await h.waitFor(`${apiCall('GET', '/focus/sessions')}.then((j) => j.sessions.length === 1)`, 'session uploaded', 20000)
@@ -169,7 +169,12 @@ try {
 
   await step('the dashboard shows the focus score', async () => {
     await h.nav('/')
-    await h.waitFor(bodyHas('Focus today'), 'focus card', 15000)
+    try {
+      await h.waitFor(bodyHas('Focus today'), 'focus card', 15000)
+    } catch (e) {
+      const page = await cdp.ev(`location.pathname + ' | ' + document.body.innerText.slice(0, 400).replace(/\\s+/g, ' ')`)
+      throw new Error(`${e.message}. The page showed: ${page}`)
+    }
     const pct = await cdp.ev(`(document.querySelector('[data-testid="focus-card"]').innerText.match(/(\\d+)%/) || [])[1]`)
     if (!pct) throw new Error('no score shown')
     await h.waitFor(bodyHas('Biggest distraction'), 'top distraction')

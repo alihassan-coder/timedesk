@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:memory": "tsx src/dev-memory.ts",
+    "dev:google": "tsx src/dev-memory.ts --real-google",
     "build": "node scripts/build.mjs"
   },
   "dependencies": {
