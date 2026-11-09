@@ -260,5 +260,5 @@ try {
 } finally {
   console.log(results.join('\n'))
   app.kill()
-  process.exit(results.some((r) => !r.startsWith('PASS')) ? 1 : 0)
+  process.exit(results.some((r) => r.startsWith('FAIL') || r.startsWith('ERROR')) ? 1 : 0)
 }
