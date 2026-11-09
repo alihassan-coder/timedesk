@@ -20,11 +20,29 @@ const SHOTS = process.argv[2]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
 
-/** The main timedesk window on the virtual screen: the widest window whose title mentions timedesk. */
-function mainWindowRow() {
-  const rows = execFileSync('wmctrl', ['-lG']).toString().split('\n').filter(Boolean).map((l) => l.trim().split(/\s+/))
-  // wmctrl -lG columns: id, desktop, x, y, width, height, host, title...
-  return rows.filter((p) => /timedesk/i.test(p.slice(7).join(' ')) && Number(p[4]) >= 600).sort((a, b) => Number(b[4]) - Number(a[4]))[0]
+/** X11 ids of the app's windows whose WM_CLASS is "timedesk" (what docks match to timedesk.desktop). */
+function timedeskWindowIds() {
+  try {
+    return execFileSync('xdotool', ['search', '--class', '^timedesk$']).toString().split('\n').filter(Boolean)
+  } catch {
+    return [] // xdotool exits 1 when nothing matches
+  }
+}
+
+/** The main window: the widest of the app's windows. Retries for a few seconds while the window manager settles. */
+async function mainWindowId() {
+  for (let i = 0; i < 20; i++) {
+    const sized = timedeskWindowIds()
+      .map((id) => {
+        const geo = execFileSync('xdotool', ['getwindowgeometry', id]).toString()
+        return { id, width: Number(/Geometry: (\d+)x/.exec(geo)?.[1] ?? 0) }
+      })
+      .filter((w) => w.width >= 600)
+      .sort((a, b) => b.width - a.width)
+    if (sized[0]) return sized[0].id
+    await sleep(500)
+  }
+  return null
 }
 
 const userData = mkdtempSync(join(tmpdir(), 'td-widget-'))
@@ -95,20 +113,17 @@ try {
 
   if (process.platform === 'linux') {
     await step('Linux: the window is named timedesk, so docks show the timedesk logo (not a generic icon)', async () => {
-      const mainRow = mainWindowRow()
-      if (!mainRow) throw new Error('could not find the main window on the virtual screen')
-      const wmClass = execFileSync('xprop', ['-id', mainRow[0], 'WM_CLASS']).toString().trim()
-      results.push('      ' + wmClass)
-      if (!/"timedesk"/i.test(wmClass)) throw new Error('the window is not named timedesk: ' + wmClass)
+      const id = await mainWindowId()
+      if (!id) throw new Error('no window with WM_CLASS "timedesk": docks would show a generic icon')
+      results.push('      ' + execFileSync('xprop', ['-id', id, 'WM_CLASS']).toString().trim())
     })
   }
 
   await step('Automatic: no floating window while timedesk is in front, even with a timer running', async () => {
     if (process.platform === 'linux') {
       // A virtual screen has no person to click on a window: give the main window the focus, as a person would.
-      const mainRow = mainWindowRow()
-      if (!mainRow) throw new Error('could not find the main window on the virtual screen')
-      execFileSync('wmctrl', ['-i', '-a', mainRow[0]])
+      const id = await mainWindowId()
+      if (id) execFileSync('xdotool', ['windowactivate', '--sync', id])
       await sleep(800)
     }
     await main.ev(`document.querySelector('[aria-label="Floating timer style"] [role=radio]').click()`)
