@@ -110,7 +110,7 @@ function ColorPicker({ value, onChange }: { value: Colors; onChange: (c: Colors)
   const badHex = v !== '' && !isHexColor(typed)
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-6 gap-2 sm:grid-cols-12" role="radiogroup" aria-label="Project colour">
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Project colour">
         {PRESETS.map((c) => (
           <button
             key={c}

@@ -53,6 +53,7 @@ export function createTimeService(db: Db) {
         }
       }
       const startedAt = fromDevice(input.startedAt, now)
+      // A timer on a task counts for that task's project when no project is named (Tempo and scripts often name only the task).
       // Only this person's own (not deleted) task and project. Something else, or something deleted on another device
       // while this one was offline, is left out rather than refused, so the tracked time is never lost.
       const ownTask = input.taskId
@@ -71,7 +72,7 @@ export function createTimeService(db: Db) {
       }
       const [row] = await db
         .insert(e)
-        .values({ id: input.id ?? crypto.randomUUID(), userId: user.id, workspaceId: user.id, taskId: ownTask?.id ?? null, projectId: ownProject?.id ?? null, startedAt })
+        .values({ id: input.id ?? crypto.randomUUID(), userId: user.id, workspaceId: user.id, taskId: ownTask?.id ?? null, projectId: ownProject?.id ?? ownTask?.projectId ?? null, startedAt })
         .returning()
       return row
     },

@@ -111,3 +111,22 @@ describe('custom project colours', () => {
     expect((await me.post('/projects', { name: 'X', color: 13 })).status).toBe(422)
   })
 })
+
+describe('a timer on a task', () => {
+  it('counts for the task\'s project when no project is named', async () => {
+    const { project } = await (await me.post('/projects', { name: 'Site' })).json()
+    const { task } = await (await me.post('/tasks', { title: 'Hero', projectId: project.id })).json()
+    const { entry } = await (await me.post('/time-entries/start', { taskId: task.id })).json()
+    expect(entry.projectId).toBe(project.id)
+    await me.post('/time-entries/stop', { id: entry.id })
+  })
+
+  it("someone else's task or project is left out, but the time is kept", async () => {
+    const { task } = await (await other.post('/tasks', { title: 'Not yours' })).json()
+    const r = await me.post('/time-entries/start', { taskId: task.id })
+    expect(r.status).toBe(201)
+    const { entry } = await r.json()
+    expect(entry.taskId).toBeNull()
+    await me.post('/time-entries/stop', { id: entry.id })
+  })
+})
