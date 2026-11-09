@@ -43,14 +43,20 @@ export function dueBucketOn(due: string | null, today: string): DueBucket {
   return 'later'
 }
 
-/** The next due date (YYYY-MM-DD) after `due` for a recurring task. */
+/**
+ * The next due date (YYYY-MM-DD) after `due` for a recurring task. Monthly keeps the day number, but never runs
+ * past the end of the next month: 31 Jan becomes 28 (or 29) Feb, not 3 Mar. Works in UTC, so no clock change can shift it.
+ */
 export function nextDue(due: string, r: Recurrence): string {
   const [y, m, d] = due.split('-').map(Number)
-  const next =
-    r.freq === 'monthly'
-      ? new Date(y, m, d)
-      : new Date(y, m - 1, d + (r.freq === 'daily' ? 1 : r.freq === 'weekly' ? 7 : Math.max(1, r.every ?? 1)))
-  return toDateKey(next.getTime())
+  let next: Date
+  if (r.freq === 'monthly') {
+    const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate() // m is 1-based, so month index m is the next month
+    next = new Date(Date.UTC(y, m, Math.min(d, lastDay)))
+  } else {
+    next = new Date(Date.UTC(y, m - 1, d + (r.freq === 'daily' ? 1 : r.freq === 'weekly' ? 7 : Math.max(1, r.every ?? 1))))
+  }
+  return next.toISOString().slice(0, 10)
 }
 
 export function describeRecurrence(r: Recurrence): string {

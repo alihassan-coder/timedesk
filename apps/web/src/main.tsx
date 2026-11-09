@@ -27,8 +27,18 @@ window.addEventListener('load', () => {
   }, 10_000)
 })
 
+// The web app opens without a connection (the desktop app carries its own copy of the interface instead).
+if (import.meta.env.PROD && 'serviceWorker' in navigator && !window.timedesk && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+  })
+}
+
 // In the desktop app the saved login token is loaded first, so the first screen already knows who is signed in.
-void initDesktopAuth().then(() =>
+// If reading the token fails, the app still starts (signed out) instead of staying blank.
+void initDesktopAuth()
+  .catch(() => undefined)
+  .then(() =>
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />

@@ -56,6 +56,12 @@ export interface GoogleTokens {
 export class GoogleAuthError extends Error {}
 /** The short-lived access token was rejected: refresh it and try once more. */
 export class GoogleUnauthorizedError extends Error {}
+/** Google could not be reached at all (network failure), or did not answer in time (`timeout`). */
+export class GoogleUnreachableError extends Error {
+  constructor(public readonly timeout: boolean) {
+    super(timeout ? 'Google did not answer in time.' : 'Google could not be reached.')
+  }
+}
 /** Any other failure from Google. */
 export class GoogleApiError extends Error {
   constructor(
@@ -66,12 +72,15 @@ export class GoogleApiError extends Error {
   }
 }
 
+/** Events from a listing. `more` is true when Google had further pages that were not read (the listing was cut off). */
+export type GoogleEventList = GoogleEvent[] & { more?: boolean }
+
 export interface GoogleClient {
   authUrl(a: { redirectUri: string; state: string }): string
   exchangeCode(a: { code: string; redirectUri: string }): Promise<GoogleTokens>
   refresh(refreshToken: string): Promise<{ accessToken: string; expiresAt: Date }>
   revoke(token: string): Promise<void>
-  listEvents(accessToken: string, calendarId: string, query: GoogleEventQuery): Promise<GoogleEvent[]>
+  listEvents(accessToken: string, calendarId: string, query: GoogleEventQuery): Promise<GoogleEventList>
   /** null when the event does not exist (any more). */
   getEvent(accessToken: string, calendarId: string, eventId: string): Promise<GoogleEvent | null>
   insertEvent(accessToken: string, calendarId: string, input: GoogleEventInput): Promise<GoogleEvent>
@@ -91,28 +100,47 @@ export const GOOGLE_SCOPES = ['https://www.googleapis.com/auth/calendar.events',
 const API = 'https://www.googleapis.com/calendar/v3'
 const enc = encodeURIComponent
 
+/**
+ * fetch fails with a TypeError when the network is down and a TimeoutError when the time limit passes (also while the
+ * body is still being read). Both become a GoogleUnreachableError, so callers can answer 502 or 504 instead of a crash.
+ */
+async function reach<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (e) {
+    if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) throw new GoogleUnreachableError(true)
+    if (e instanceof TypeError) throw new GoogleUnreachableError(false)
+    if (e instanceof SyntaxError) throw new GoogleApiError(502, 'Google answered with something that is not JSON.')
+    throw e
+  }
+}
+
 export function createGoogleClient(opts: { clientId: string; clientSecret: string }): GoogleClient {
   async function call(url: string, token: string, init: RequestInit = {}): Promise<Response> {
-    const res = await fetch(url, {
-      ...init,
-      headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
-      signal: AbortSignal.timeout(15_000),
-    })
+    const res = await reach(() =>
+      fetch(url, {
+        ...init,
+        headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
+        signal: AbortSignal.timeout(15_000),
+      }),
+    )
     if (res.status === 401) throw new GoogleUnauthorizedError('Google rejected the access token.')
     return res
   }
   async function ok<T>(res: Response): Promise<T> {
     if (!res.ok) throw new GoogleApiError(res.status, `Google Calendar answered ${res.status}.`)
-    return (await res.json()) as T
+    return reach(() => res.json() as Promise<T>)
   }
 
   async function tokenRequest(params: Record<string, string>) {
-    const res = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: opts.clientId, client_secret: opts.clientSecret, ...params }),
-      signal: AbortSignal.timeout(15_000),
-    })
+    const res = await reach(() =>
+      fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ client_id: opts.clientId, client_secret: opts.clientSecret, ...params }),
+        signal: AbortSignal.timeout(15_000),
+      }),
+    )
     const json = (await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string }
     if (!res.ok || !json.access_token) {
       if (json.error === 'invalid_grant') throw new GoogleAuthError('invalid_grant')
@@ -162,13 +190,17 @@ export function createGoogleClient(opts: { clientId: string; clientSecret: strin
     },
 
     async listEvents(token, calendarId, q) {
-      const out: GoogleEvent[] = []
+      const out: GoogleEventList = []
       let pageToken: string | undefined
       for (let page = 0; page < 6; page++) {
         const params = new URLSearchParams({ maxResults: '250', singleEvents: 'true' })
         if (q.timeMin) params.set('timeMin', q.timeMin)
         if (q.timeMax) params.set('timeMax', q.timeMax)
-        if (q.updatedMin) params.set('updatedMin', q.updatedMin)
+        // Changes oldest first, so a listing cut off after the last page still tells how far it got.
+        if (q.updatedMin) {
+          params.set('updatedMin', q.updatedMin)
+          params.set('orderBy', 'updated')
+        }
         if (q.privateProp) params.set('privateExtendedProperty', q.privateProp)
         if (q.showDeleted) params.set('showDeleted', 'true')
         if (pageToken) params.set('pageToken', pageToken)
@@ -177,6 +209,7 @@ export function createGoogleClient(opts: { clientId: string; clientSecret: strin
         pageToken = json.nextPageToken
         if (!pageToken) break
       }
+      if (pageToken) out.more = true // more than 6 pages: the rest was not read
       return out
     },
 

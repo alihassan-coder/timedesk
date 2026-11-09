@@ -1,7 +1,14 @@
 import { z } from 'zod'
-import { isValidTimeZone, startOfWeek } from '@timedesk/shared'
+import { isHexColor, isValidTimeZone, PROJECT_COLOR_COUNT, startOfWeek } from '@timedesk/shared'
 
-const dateKey = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+/** A real calendar day as YYYY-MM-DD: 2026-02-31 is refused, not rolled over into March. */
+const dateKey = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+  .refine((k) => {
+    const d = new Date(`${k}T00:00:00Z`)
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === k
+  }, 'That date does not exist.')
 const recurrence = z.object({
   freq: z.enum(['daily', 'weekly', 'monthly', 'custom']),
   every: z.number().int().min(1).max(365).optional(),
@@ -18,13 +25,16 @@ export const eventIdParam = z.object({ id: z.string().min(1).max(256) })
 const projectFields = {
   name: z.string().trim().min(1).max(120),
   description: z.string().max(500),
-  color: z.number().int().min(1).max(5),
+  color: z.number().int().min(1).max(PROJECT_COLOR_COUNT),
+  /** A colour the person picked (#rrggbb), or null for the preset. */
+  customColor: z.string().refine(isHexColor, 'Use a colour like #3b82f6.').nullable(),
 }
 export const createProject = z.object({
   id: z.string().min(1).optional(),
   name: projectFields.name,
   description: projectFields.description.default(''),
   color: projectFields.color.default(1),
+  customColor: projectFields.customColor.default(null),
 })
 export const updateProject = z.object(projectFields).partial()
 
@@ -48,12 +58,23 @@ export const createTask = z.object({
 export const updateTask = z.object(taskFields).partial()
 export const taskQuery = z.object({ status: z.enum(['todo', 'in_progress', 'done']).optional() })
 
+/**
+ * Starting a timer. An app that works offline sends its own id and the moment the person pressed start, so the
+ * request can arrive later (and twice) and still mean the same timer. `parallel` keeps the timers already running
+ * (multitasking); otherwise they stop when this one starts.
+ */
 export const startTimer = z.object({
+  id: z.string().min(8).max(64).optional(),
   taskId: z.string().nullable().default(null),
   projectId: z.string().nullable().default(null),
+  startedAt: z.coerce.date().optional(),
+  parallel: z.boolean().default(false),
 })
-/** Stopping can name the moment the work really ended (for example when the person went idle). */
-export const stopTimer = z.object({ endedAt: z.coerce.date().optional() })
+/**
+ * Stopping. With `id`, that timer (safe to send twice); without, every running timer. `endedAt` names the moment the
+ * work really ended (for example when the person went idle, or pressed stop while offline).
+ */
+export const stopTimer = z.object({ id: z.string().min(1).max(64).optional(), endedAt: z.coerce.date().optional() })
 export const timeRange = z.object({ from: z.coerce.date().optional(), to: z.coerce.date().optional() })
 
 export const userStatusQuery = z.object({ status: z.enum(['pending', 'approved', 'rejected', 'all']).default('pending') })
@@ -73,8 +94,10 @@ export const chatBody = z.object({
 export const saveChat = z.object({
   title: z.string().trim().min(1).max(200),
   messages: z
-    .array(z.object({ id: z.string().min(1), role: z.enum(['user', 'assistant', 'system']), parts: z.array(z.unknown()) }))
-    .max(500),
+    .array(z.object({ id: z.string().min(1).max(200), role: z.enum(['user', 'assistant', 'system']), parts: z.array(z.unknown()) }))
+    .max(500)
+    // Each message is stored under its id: two with the same id would overwrite each other.
+    .refine((list) => new Set(list.map((m) => m.id)).size === list.length, 'Each message needs its own id.'),
 })
 
 /** Only known preference groups, each a plain object, so a client cannot park arbitrary data here. */
@@ -167,7 +190,7 @@ const eventFields = {
   /** Optional. Inferred from the format of `start` when left out. */
   allDay: z.boolean(),
   /** IANA name such as Europe/London, for times written without an offset. */
-  timeZone: z.string().max(64),
+  timeZone: z.string().max(64).refine(isValidTimeZone, 'Unknown time zone.'),
 }
 const endAfterStart = (start: string, end: string) => (dayOnly.test(start) ? end > start : Date.parse(end) > Date.parse(start))
 const consistent = (v: { start?: string; end?: string; allDay?: boolean }) => {

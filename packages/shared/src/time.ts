@@ -1,8 +1,9 @@
+import { splitParallel } from './parallel.ts'
 import type { ReportPeriod, TimeEntry } from './types.ts'
 
-/** Duration of an entry in ms. A running entry counts up to `now`. */
+/** Duration of an entry in ms. A running entry counts up to `now`. A piece of shared time counts its share. */
 export function entryDuration(entry: TimeEntry, now: number): number {
-  return Math.max(0, (entry.endedAt ?? now) - entry.startedAt)
+  return Math.max(0, (entry.endedAt ?? now) - entry.startedAt) * (entry.share ?? 1)
 }
 
 /** 3725000 -> "01:02:05" */
@@ -50,7 +51,7 @@ export function totalsByTask(
 ): Map<string, number> {
   const from = periodStart(period, now)
   const totals = new Map<string, number>()
-  for (const e of entries) {
+  for (const e of splitParallel(entries)) {
     if (e.startedAt < from) continue
     const key = e.taskId ?? ''
     totals.set(key, (totals.get(key) ?? 0) + entryDuration(e, now))
@@ -58,11 +59,11 @@ export function totalsByTask(
   return totals
 }
 
-/** Milliseconds of `entry` that fall inside [from, to). Entries crossing midnight are split. */
+/** Milliseconds of `entry` that fall inside [from, to). Entries crossing midnight are split. Shared time counts its share. */
 export function overlapMs(entry: TimeEntry, from: number, to: number, now: number): number {
   const start = Math.max(entry.startedAt, from)
   const end = Math.min(entry.endedAt ?? now, to)
-  return Math.max(0, end - start)
+  return Math.max(0, end - start) * (entry.share ?? 1)
 }
 
 /** Tracked ms for each of the last `days` local days, oldest first, ending with today. */
@@ -71,12 +72,13 @@ export function dailyTotals(
   now: number,
   days: number,
 ): { start: number; ms: number }[] {
+  const pieces = splitParallel(entries)
   const t = new Date(now)
   const result: { start: number; ms: number }[] = []
   for (let i = days - 1; i >= 0; i--) {
     const start = new Date(t.getFullYear(), t.getMonth(), t.getDate() - i).getTime()
     const end = new Date(t.getFullYear(), t.getMonth(), t.getDate() - i + 1).getTime()
-    const ms = entries.reduce((sum, e) => sum + overlapMs(e, start, end, now), 0)
+    const ms = pieces.reduce((sum, e) => sum + overlapMs(e, start, end, now), 0)
     result.push({ start, ms })
   }
   return result

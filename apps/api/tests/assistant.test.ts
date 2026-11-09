@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { formatHours } from '@timedesk/shared'
 import { schema } from '@timedesk/db'
 import { fakeMemory } from './fakes.ts'
-import { api, approvedMember, createTestApp, scriptedModel, textStep, toolStep } from './helpers.ts'
+import { api, approvedMember, createTestApp, scriptedModel, textStep, toolStep, chatAllowingAll } from './helpers.ts'
 
 const SECRET = 'sk-openai-test-key-1234567890'
 const chat = (provider = 'openai', text = 'hello', model = 'gpt-test') => ({
@@ -60,6 +60,14 @@ describe('assistant chat: keys', () => {
     expect((await ann.post('/assistant/chat', { provider: 'openai', model: 'm', messages: [] })).status).toBe(422)
   })
 
+  it('a conversation that cannot be turned into model messages is a 422, not a crash', async () => {
+    const { ann } = await setup({ steps: [textStep('x')] })
+    await ann.put('/ai/keys/openai', { key: SECRET })
+    const res = await ann.post('/assistant/chat', { provider: 'openai', model: 'm', messages: [{ id: 'm1', role: 'robot', parts: [{ type: 'text', text: 'hi' }] }] })
+    expect(res.status).toBe(422)
+    expect((await res.json()).error).toContain('could not be read')
+  }, 30_000)
+
   it('requires a signed-in account', async () => {
     const { t } = await setup({ steps: [textStep('x')] })
     const res = await t.app.request('/v1/assistant/chat', { method: 'POST', body: '{}' })
@@ -109,7 +117,8 @@ describe('assistant tools', () => {
     const project = (await (await ann.post('/projects', { name: 'Website' })).json()).project
     await ann.post('/tasks', { title: 'Fix header', projectId: project.id })
     await ann.post('/time-entries/start', { projectId: project.id })
-    await (await ann.post('/assistant/chat', chat())).text()
+    // Deleting waits for "Allow"; this presses it, like the person would in the app.
+    await chatAllowingAll(ann, chat())
 
     expect((await (await ann.get('/projects')).json()).projects).toHaveLength(0)
     const tasks = await t.db.select().from(schema.tasks)

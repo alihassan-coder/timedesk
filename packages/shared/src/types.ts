@@ -10,10 +10,18 @@ export interface Recurrence {
 export interface Project {
   id: string
   name: string
-  /** One of the chart palette slots, 1 to 5. */
-  color: 1 | 2 | 3 | 4 | 5
+  /** One of the preset colours (see PROJECT_COLOR_COUNT). Used when there is no custom colour. */
+  color: number
+  /** A colour the person picked, as #rrggbb. Wins over the preset. */
+  customColor?: string | null
   description: string
 }
+
+/** How many preset project colours there are (numbered from 1). */
+export const PROJECT_COLOR_COUNT = 12
+
+/** A custom project colour: #rrggbb. */
+export const isHexColor = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)
 
 /** A todo. Ids are client-generated so records can be created offline. */
 export interface Task {
@@ -37,6 +45,11 @@ export interface TimeEntry {
   projectId: string | null
   startedAt: number // epoch ms
   endedAt: number | null
+  /**
+   * Only on pieces made by splitParallel: the part of this time that counts for this timer (1/k while k timers ran
+   * at once). Real entries never have it.
+   */
+  share?: number
 }
 
 export type ReportPeriod = 'day' | 'month' | 'quarter' | 'year'

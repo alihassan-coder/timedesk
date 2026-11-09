@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { formatHours, overlapMs } from '@timedesk/shared'
+import { formatHours, overlapMs, splitParallel, type Project, type TimeEntry } from '@timedesk/shared'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -18,20 +18,44 @@ export default function TimesheetPage() {
 
   const t = new Date(now)
   const mondayShift = (t.getDay() + 6) % 7
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const start = new Date(t.getFullYear(), t.getMonth(), t.getDate() - mondayShift - offset * 7 + i).getTime()
-    const end = new Date(t.getFullYear(), t.getMonth(), t.getDate() - mondayShift - offset * 7 + i + 1).getTime()
-    return { start, end }
-  })
+  const weekStart = new Date(t.getFullYear(), t.getMonth(), t.getDate() - mondayShift - offset * 7).getTime()
+  const days = useMemo(() => {
+    const s = new Date(weekStart)
+    return Array.from({ length: 7 }, (_, i) => ({
+      start: new Date(s.getFullYear(), s.getMonth(), s.getDate() + i).getTime(),
+      end: new Date(s.getFullYear(), s.getMonth(), s.getDate() + i + 1).getTime(),
+    }))
+  }, [weekStart])
 
-  const rows = projects.map((p) => {
-    const perDay = days.map((d) =>
-      entries.filter((e) => e.projectId === p.id).reduce((s, e) => s + overlapMs(e, d.start, d.end, now), 0),
-    )
-    return { project: p, perDay, total: perDay.reduce((s, v) => s + v, 0) }
-  })
-  const dayTotals = days.map((_, i) => rows.reduce((s, r) => s + r.perDay[i], 0))
-  const grand = dayTotals.reduce((s, v) => s + v, 0)
+  // Overlapping timers share their time, so two running at once do not count double.
+  const pieces = useMemo(() => splitParallel(entries), [entries])
+
+  const { rows, dayTotals, grand } = useMemo(() => {
+    const weekEnd = days[6].end
+    const known = new Set(projects.map((p) => p.id))
+    // One pass: only this week's time, grouped by project ("No project" for none or a deleted one).
+    const byKey = new Map<string | null, TimeEntry[]>()
+    for (const e of pieces) {
+      if (e.startedAt >= weekEnd || (e.endedAt ?? now) <= days[0].start) continue
+      const key = e.projectId && known.has(e.projectId) ? e.projectId : null
+      const list = byKey.get(key)
+      if (list) list.push(e)
+      else byKey.set(key, [e])
+    }
+    const perDayOf = (list: TimeEntry[]) => days.map((d) => list.reduce((s, e) => s + overlapMs(e, d.start, d.end, now), 0))
+    const rows: { key: string; project: Project | null; perDay: number[]; total: number }[] = projects.map((p) => {
+      const perDay = perDayOf(byKey.get(p.id) ?? [])
+      return { key: p.id, project: p, perDay, total: perDay.reduce((s, v) => s + v, 0) }
+    })
+    const none = byKey.get(null)
+    if (none) {
+      const perDay = perDayOf(none)
+      const total = perDay.reduce((s, v) => s + v, 0)
+      if (total > 0) rows.push({ key: 'none', project: null, perDay, total })
+    }
+    const dayTotals = days.map((_, i) => rows.reduce((s, r) => s + r.perDay[i], 0))
+    return { rows, dayTotals, grand: dayTotals.reduce((s, v) => s + v, 0) }
+  }, [pieces, projects, days, now])
 
   const label = `${new Date(days[0].start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} to ${new Date(days[6].start).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
 
@@ -71,10 +95,10 @@ export default function TimesheetPage() {
           </TableHeader>
           <TableBody>
             {rows.map((r) => (
-              <TableRow key={r.project.id}>
+              <TableRow key={r.key}>
                 <TableCell>
-                  <span className="flex items-center gap-2">
-                    <ProjectDot project={r.project} /> {r.project.name}
+                  <span className={cn('flex items-center gap-2', !r.project && 'text-muted-foreground')}>
+                    <ProjectDot project={r.project} /> {r.project?.name ?? 'No project'}
                   </span>
                 </TableCell>
                 {r.perDay.map((ms, i) => (

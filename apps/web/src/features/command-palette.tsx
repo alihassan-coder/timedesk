@@ -59,7 +59,9 @@ export function CommandPalette() {
   }
 
   const running = entries.some((e) => e.endedAt === null)
+  // Built only while the palette is open: closed, it would rebuild up to 200 task commands on every store change.
   const commands = useMemo<Command[]>(() => {
+    if (!open) return []
     const out: Command[] = []
     if (running) out.push({ id: 'stop', group: 'Timer', label: 'Stop the timer', icon: <Square />, run: () => void actions.stopTimer() })
     else {
@@ -75,12 +77,13 @@ export function CommandPalette() {
     for (const prompt of [TEMPO_PROMPTS.plan, TEMPO_PROMPTS.day, TEMPO_PROMPTS.week]) {
       out.push({ id: `tempo-${prompt}`, group: 'Tempo', label: prompt, icon: <Sparkles />, run: () => navigate(askTempoLink(prompt)) })
     }
+    const projectsById = new Map(projects.map((p) => [p.id, p]))
     for (const t of tasks.filter((x) => x.status !== 'done').slice(0, 200)) {
       out.push({
         id: `start-${t.id}`,
         group: 'Tasks',
         label: `Start timer: ${t.title}`,
-        icon: <ProjectDot project={projects.find((p) => p.id === t.projectId)} />,
+        icon: <ProjectDot project={t.projectId ? projectsById.get(t.projectId) : undefined} />,
         run: () => void actions.startTimer({ taskId: t.id }),
       })
     }
@@ -89,7 +92,7 @@ export function CommandPalette() {
     }
     out.push({ id: 'theme', group: 'Other', label: 'Switch light and dark mode', icon: <Moon />, run: toggleMode })
     return out
-  }, [tasks, projects, entries, running, navigate])
+  }, [open, tasks, projects, entries, running, navigate])
 
   const q = query.trim()
   const parsed = useMemo(() => (q ? parseQuickAdd(q, { now: Date.now(), projects }) : null), [q, projects])

@@ -123,3 +123,72 @@ describe('editing a task changes only what was sent', () => {
     expect(cleared.due).toBeNull() // an explicit null still clears it
   })
 })
+
+describe('recurring tasks and races', () => {
+  const nextOf = async (title: string) => (await (await ann.get('/tasks')).json()).tasks.filter((x: { title: string; status: string }) => x.title === title && x.status !== 'done')
+
+  it('completing a recurring task twice at once schedules the next one only once', async () => {
+    const { task } = await (await ann.post('/tasks', { title: 'Water plants', due: '2026-01-31', recurrence: { freq: 'monthly' } })).json()
+    const results = await Promise.all([ann.patch(`/tasks/${task.id}`, { status: 'done' }), ann.patch(`/tasks/${task.id}`, { status: 'done' })])
+    expect(results.map((r) => r.status)).toEqual([200, 200])
+    const open = await nextOf('Water plants')
+    expect(open).toHaveLength(1)
+    expect(open[0].due).toBe('2026-02-28') // the last day of February, not 3 March
+  })
+
+  it('completing an already finished task again keeps when it was finished and schedules nothing', async () => {
+    const { task } = await (await ann.post('/tasks', { title: 'Weekly report', due: '2026-11-02', recurrence: { freq: 'weekly' } })).json()
+    const first = (await (await ann.patch(`/tasks/${task.id}`, { status: 'done' })).json()).task
+    const again = (await (await ann.patch(`/tasks/${task.id}`, { status: 'done', title: 'Weekly report' })).json()).task
+    expect(again.completedAt).toBe(first.completedAt)
+    expect(await nextOf('Weekly report')).toHaveLength(1)
+  })
+
+  it('a task deleted before the change arrives answers 404, not a crash', async () => {
+    const { task } = await (await ann.post('/tasks', { title: 'Vanishing' })).json()
+    await ann.del(`/tasks/${task.id}`)
+    expect((await ann.patch(`/tasks/${task.id}`, { status: 'done' })).status).toBe(404)
+    expect((await ann.patch(`/tasks/${task.id}`, { title: 'x' })).status).toBe(404)
+  })
+
+  it('refuses a due date that does not exist', async () => {
+    expect((await ann.post('/tasks', { title: 'Impossible', due: '2026-02-31' })).status).toBe(422)
+    expect((await ann.post('/tasks', { title: 'Impossible', due: '2026-13-01' })).status).toBe(422)
+    expect((await ann.post('/tasks', { title: 'Leap day', due: '2028-02-29' })).status).toBe(201)
+  })
+})
+
+describe('a task only points at your own live projects', () => {
+  it("refuses someone else's project, a deleted one, or one that never existed", async () => {
+    const bobs = (await (await bob.post('/projects', { name: 'Bob only' })).json()).project
+    const gone = (await (await ann.post('/projects', { name: 'Gone soon' })).json()).project
+    await ann.del(`/projects/${gone.id}`)
+    for (const projectId of [bobs.id, gone.id, 'no-such-project']) {
+      const res = await ann.post('/tasks', { title: 'Sneaky', projectId })
+      expect(res.status).toBe(422)
+      expect((await res.json()).details[0].path).toBe('projectId')
+    }
+    const { task } = await (await ann.post('/tasks', { title: 'Honest' })).json()
+    expect((await ann.patch(`/tasks/${task.id}`, { projectId: bobs.id })).status).toBe(422)
+    expect((await ann.patch(`/tasks/${task.id}`, { projectId: null })).status).toBe(200)
+  })
+
+  it('a retried create still returns the task even after its project was deleted', async () => {
+    const proj = (await (await ann.post('/projects', { name: 'Short lived' })).json()).project
+    const body = { id: 'offline-retry-1', title: 'Saved offline', projectId: proj.id }
+    expect((await ann.post('/tasks', body)).status).toBe(201)
+    await ann.del(`/projects/${proj.id}`)
+    const again = await ann.post('/tasks', body)
+    expect(again.status).toBe(201)
+    expect((await again.json()).task.id).toBe('offline-retry-1')
+  })
+
+  it('deleting a project clears it from its tasks and tracked time together', async () => {
+    const proj = (await (await ann.post('/projects', { name: 'Batch' })).json()).project
+    const { task } = await (await ann.post('/tasks', { title: 'In batch', projectId: proj.id })).json()
+    expect((await ann.del(`/projects/${proj.id}`)).status).toBe(204)
+    expect((await ann.del(`/projects/${proj.id}`)).status).toBe(404)
+    const tasks = (await (await ann.get('/tasks')).json()).tasks
+    expect(tasks.find((x: { id: string }) => x.id === task.id).projectId).toBeNull()
+  })
+})

@@ -87,6 +87,25 @@ describe('activity tracker', () => {
     expect(tracker.drain()).toEqual([])
   })
 
+  it('a very long app name stays one slice (it is compared as stored, cut to 120 characters)', async () => {
+    const { tracker, show } = setup()
+    const long = 'A'.repeat(300)
+    show({ app: long, title: 'x' })
+    for (let i = 0; i < 3; i++) await tracker.tick()
+    expect(tracker.drain()).toEqual([expect.objectContaining({ app: long.slice(0, 120), seconds: 15 })])
+  })
+
+  it('sleep closes the open slice and nothing is recorded until resume', async () => {
+    const { tracker } = setup()
+    await tracker.tick()
+    tracker.pause()
+    await tracker.tick()
+    await tracker.tick()
+    tracker.resume()
+    await tracker.tick()
+    expect(tracker.drain().map((s) => s.seconds)).toEqual([5, 5])
+  })
+
   it('apps-only mode never stores window titles', async () => {
     const { tracker } = setup({ appsOnly: true })
     await tracker.tick()

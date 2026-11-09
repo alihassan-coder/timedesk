@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { schema } from '@timedesk/db'
 import { startOfWeek, toDateKey } from '@timedesk/shared'
+import { EXPORT_ACTIVITY_LIMIT } from '../src/services/account.service.ts'
 import { fakeMemory } from './fakes.ts'
 import { account, api, approvedMember, createTestApp, DESKTOP_ORIGIN, register, signIn, WEB_ORIGIN, type TestApp } from './helpers.ts'
 
@@ -136,6 +137,32 @@ describe('export your data', () => {
     const t = await createTestApp()
     expect((await t.app.request('/v1/account/export', { headers: { Origin: WEB_ORIGIN } })).status).toBe(401)
   })
+
+  it('keeps the file small with months of activity: the latest samples in full, totals per app for all of it', async () => {
+    const t3 = await createTestApp()
+    const me = api(t3, (await approvedMember(t3, 'busy')).cookie)
+    const [{ id: userId }] = await t3.db.select({ id: schema.user.id }).from(schema.user).where(eq(schema.user.username, 'busy'))
+    const total = EXPORT_ACTIVITY_LIMIT + 5
+    const base = Date.UTC(2026, 0, 1)
+    for (let i = 0; i < total; i += 2_000) {
+      const rows = Array.from({ length: Math.min(2_000, total - i) }, (_, j) => ({
+        id: `s-${i + j}`,
+        userId,
+        app: (i + j) % 2 ? 'Code' : 'Browser',
+        startedAt: new Date(base + (i + j) * 60_000),
+        seconds: 60,
+      }))
+      await t3.db.insert(schema.activitySamples).values(rows)
+    }
+    const data = await (await me.get('/account/export')).json()
+    expect(data.activity).toHaveLength(EXPORT_ACTIVITY_LIMIT)
+    expect(data.activity[0].id).toBe('s-5') // the oldest five are left out, the rest stay in time order
+    expect(data.activity.at(-1).id).toBe(`s-${total - 1}`)
+    expect(data.activityNote).toContain('latest')
+    const seconds = data.activityByApp.reduce((sum: number, a: { seconds: number }) => sum + a.seconds, 0)
+    expect(seconds).toBe(total * 60)
+    expect(data.activityByApp.map((a: { app: string }) => a.app).sort()).toEqual(['Browser', 'Code'])
+  }, 60_000)
 })
 
 describe('delete your account', () => {

@@ -194,6 +194,9 @@ function Reflection({ monday }: { monday: string }) {
   const [saved, setSaved] = useState<{ wentWell: string; improve: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // Set when the load failed: the fields stay locked, because saving blank fields would overwrite the real reflection.
+  const [loadError, setLoadError] = useState('')
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let live = true
@@ -203,17 +206,17 @@ function Reflection({ monday }: { monday: string }) {
         setWentWell(review.wentWell)
         setImprove(review.improve)
         setSaved({ wentWell: review.wentWell, improve: review.improve })
+        setLoadError('')
         setLoaded(true)
       })
       .catch((e: unknown) => {
         if (!live) return
-        setError(e instanceof Error ? e.message : 'Could not load the review.')
-        setLoaded(true)
+        setLoadError(e instanceof Error ? e.message : 'Could not load the review.')
       })
     return () => {
       live = false
     }
-  }, [monday])
+  }, [monday, attempt])
 
   const dirty = !saved || saved.wentWell !== wentWell.trim() || saved.improve !== improve.trim()
   const save = async () => {
@@ -244,14 +247,20 @@ function Reflection({ monday }: { monday: string }) {
           <Label htmlFor="improve">What will you change next week?</Label>
           <Textarea id="improve" maxLength={4000} disabled={!loaded} value={improve} onChange={(e) => setImprove(e.target.value)} />
         </div>
-        {error && (
+        {(error || loadError) && (
           <p role="alert" className="text-destructive text-sm">
-            {error}
+            {loadError ? `Could not load your reflection: ${loadError}` : error}
           </p>
         )}
-        <Button onClick={() => void save()} disabled={!loaded || busy || !dirty}>
-          {busy ? 'Saving...' : dirty ? 'Save review' : 'Saved'}
-        </Button>
+        {loadError && !loaded ? (
+          <Button variant="outline" onClick={() => setAttempt((n) => n + 1)}>
+            Retry
+          </Button>
+        ) : (
+          <Button onClick={() => void save()} disabled={!loaded || busy || !dirty}>
+            {busy ? 'Saving...' : dirty ? 'Save review' : 'Saved'}
+          </Button>
+        )}
       </CardContent>
     </Card>
   )

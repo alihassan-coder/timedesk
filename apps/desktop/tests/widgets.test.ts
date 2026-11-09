@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_DESKTOP_SETTINGS } from '@timedesk/shared'
-import { WIDGET_SIZES, anchorOf, anchorOnScreen, createIdleWatcher, describeAway, sanitizeDesktopSettings, shouldShowWidget, widgetBounds, windowTitle } from '../src/widgets.ts'
+import { WIDGET_SIZES, anchorOf, anchorOnScreen, crashReloadDelay, createIdleWatcher, describeAway, mergeUpdateStatus, sanitizeDesktopSettings, shouldShowWidget, trayStatus, widgetBounds, windowTitle } from '../src/widgets.ts'
 
 const screen1 = { x: 0, y: 0, width: 1920, height: 1040 } // work area: the taskbar is not included
 
@@ -122,5 +122,65 @@ describe('settings from the page', () => {
   it('fills in new settings for someone who saved an older settings file', () => {
     const old = { autoStart: true, closeToTray: true, trackApps: false, trackTitles: true } as never
     expect(sanitizeDesktopSettings(old, {})).toMatchObject({ autoStart: true, widget: 'auto', widgetMode: 'compact', shortcuts: true, idleMinutes: 5 })
+  })
+})
+
+describe('coming back from sleep or the lock screen', () => {
+  const t = 1_000_000_000
+  it('asks about the time when the computer was away long enough with the timer running', () => {
+    const w = createIdleWatcher()
+    expect(w.resumed(t, t + 6 * 60_000, true, 5)).toEqual({ idleSince: t })
+  })
+  it('stays quiet after a short sleep, a stopped timer or a turned-off setting', () => {
+    const w = createIdleWatcher()
+    expect(w.resumed(t, t + 4 * 60_000, true, 5)).toBeNull()
+    expect(w.resumed(t, t + 60 * 60_000, false, 5)).toBeNull()
+    expect(w.resumed(t, t + 60 * 60_000, true, 0)).toBeNull()
+  })
+  it('counts from when the person went idle if that was before the computer slept', () => {
+    const w = createIdleWatcher()
+    w.check(300, t, true, 5) // idle since t - 300s
+    expect(w.resumed(t + 60_000, t + 120_000, true, 5)).toEqual({ idleSince: t - 300_000 })
+  })
+  it('the person is back afterwards, so the idle watcher does not ask a second time', () => {
+    const w = createIdleWatcher()
+    w.check(300, t, true, 5)
+    w.resumed(t + 60_000, t + 120_000, true, 5)
+    expect(w.check(1, t + 130_000, true, 5)).toBeNull()
+  })
+})
+
+describe('tray text', () => {
+  const start = 1_000_000_000
+  const running = { running: true, label: 'Write docs', startedAt: start }
+  it('says what runs and for how long', () => {
+    expect(trayStatus({ running: false, label: '', startedAt: null }, start)).toBe('No timer running')
+    expect(trayStatus(running, start + 5 * 60_000)).toBe('Timer running: Write docs (5m)')
+    expect(trayStatus({ ...running, label: '' }, start + 65 * 60_000)).toBe('Timer running: Stopwatch (1h 05m)')
+  })
+  it('stays the same within a minute, so the menu is not rebuilt for nothing', () => {
+    expect(trayStatus(running, start + 61_000)).toBe(trayStatus(running, start + 119_000))
+    expect(trayStatus(running, start + 119_000)).not.toBe(trayStatus(running, start + 120_000))
+  })
+})
+
+describe('update status', () => {
+  it('a failed later check does not hide an update that is ready', () => {
+    const ready = { state: 'ready' as const, version: '0.4.0' }
+    expect(mergeUpdateStatus(ready, { state: 'error', message: 'offline' })).toBe(ready)
+  })
+  it('otherwise the newest status wins', () => {
+    expect(mergeUpdateStatus({ state: 'downloading', version: '0.4.0' }, { state: 'error', message: 'x' })).toEqual({ state: 'error', message: 'x' })
+    expect(mergeUpdateStatus({ state: 'idle' }, { state: 'ready', version: '0.4.0' })).toEqual({ state: 'ready', version: '0.4.0' })
+    expect(mergeUpdateStatus({ state: 'error', message: 'x' }, { state: 'downloading', version: '0.4.0' })).toEqual({ state: 'downloading', version: '0.4.0' })
+  })
+})
+
+describe('reloading a crashed window', () => {
+  it('reloads at once the first time, then backs off up to a minute', () => {
+    expect(crashReloadDelay(1)).toBe(0)
+    expect(crashReloadDelay(2)).toBe(2000)
+    expect(crashReloadDelay(3)).toBe(4000)
+    expect(crashReloadDelay(20)).toBe(60_000)
   })
 })

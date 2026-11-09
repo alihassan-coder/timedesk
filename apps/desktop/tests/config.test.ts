@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { APP_START_URL, contentSecurityPolicy, DEV_WEB_URL, isInternalUrl, isSafeExternalUrl, resolveConfig } from '../src/config.ts'
+import { APP_START_URL, contentSecurityPolicy, DEV_WEB_URL, isInternalUrl, isSafeExternalUrl, linuxOzonePlatform, resolveConfig } from '../src/config.ts'
 
 describe('which interface the app opens', () => {
   const base = { argv: [] as string[], env: {} as Record<string, string | undefined>, hasBundledUi: true }
@@ -77,5 +77,19 @@ describe('security policy of the bundled interface', () => {
   it('without a known backend it only allows itself', () => {
     expect(contentSecurityPolicy(null)).toContain("connect-src 'self'")
     expect(contentSecurityPolicy(null)).not.toContain('https://')
+  })
+})
+
+describe('Linux display server', () => {
+  const wayland = { platform: 'linux', env: { XDG_SESSION_TYPE: 'wayland' } as Record<string, string | undefined>, argv: [] as string[] }
+  it('runs through XWayland on a Wayland session', () => {
+    expect(linuxOzonePlatform(wayland).force).toBe('x11')
+  })
+  it('leaves X11 sessions, Windows and an explicit choice alone', () => {
+    expect(linuxOzonePlatform({ ...wayland, env: { XDG_SESSION_TYPE: 'x11' } }).force).toBeNull()
+    expect(linuxOzonePlatform({ ...wayland, platform: 'win32' }).force).toBeNull()
+    expect(linuxOzonePlatform({ ...wayland, env: { ...wayland.env, TIMEDESK_WAYLAND: '1' } }).force).toBeNull()
+    expect(linuxOzonePlatform({ ...wayland, argv: ['--ozone-platform=wayland'] }).force).toBeNull()
+    expect(linuxOzonePlatform({ ...wayland, env: { ...wayland.env, ELECTRON_OZONE_PLATFORM_HINT: 'auto' } }).force).toBeNull()
   })
 })

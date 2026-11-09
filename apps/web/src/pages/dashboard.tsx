@@ -1,7 +1,8 @@
 import { Link } from 'react-router'
 import { CalendarRange, NotebookPen, Sparkles, Sunrise } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, XAxis } from 'recharts'
-import { dailyTotals, dueBucket, formatHours, overlapMs, periodStart } from '@timedesk/shared'
+import { useMemo } from 'react'
+import { dailyTotals, dueBucket, formatHours, overlapMs, periodStart, type TimeEntry } from '@timedesk/shared'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,13 +22,33 @@ function greeting(hour: number) {
 }
 
 export default function Dashboard() {
-  const { tasks, entries, projects, ready, error } = useStore()
+  const { tasks, entries, tracked, projects, ready } = useStore()
   const { user } = useProfile()
-  const running = entries.some((e) => e.endedAt === null)
-  const now = useNow(running)
+  // The page refreshes once a minute; only the "Tracked today" figure ticks every second (see LiveToday).
+  const now = useNow(false)
+  const minute = Math.floor(now / 60_000)
 
-  const days = dailyTotals(entries, now, 14)
-  const today = days[13].ms
+  const { days, trend, byProject, pieConfig } = useMemo(() => {
+    const at = minute * 60_000
+    const days = dailyTotals(tracked, at, 14)
+    const trend = days.map((d) => ({
+      day: new Date(d.start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+      hours: Math.round((d.ms / 3_600_000) * 10) / 10,
+    }))
+    // One pass over the entries for the last 7 days, instead of one per project.
+    const from = periodStart('day', at - 6 * 86_400_000)
+    const perProject = new Map<string, number>()
+    for (const e of tracked) {
+      if (!e.projectId || (e.endedAt !== null && e.endedAt < from)) continue
+      perProject.set(e.projectId, (perProject.get(e.projectId) ?? 0) + overlapMs(e, from, at + 1, at))
+    }
+    const byProject = projects
+      .map((p) => ({ id: p.id, name: p.name, ms: perProject.get(p.id) ?? 0, fill: projectColor(p) }))
+      .filter((p) => p.ms > 0)
+    const pieConfig = Object.fromEntries(byProject.map((p) => [p.id, { label: p.name, color: p.fill }])) satisfies ChartConfig
+    return { days, trend, byProject, pieConfig }
+  }, [tracked, projects, minute])
+
   const yesterday = days[12].ms
   const week = days.slice(7).reduce((s, d) => s + d.ms, 0)
   const prevWeek = days.slice(0, 7).reduce((s, d) => s + d.ms, 0)
@@ -36,25 +57,9 @@ export default function Dashboard() {
   const overdue = open.filter((t) => dueBucket(t.due, now) === 'overdue').length
   const doneCount = tasks.filter((t) => t.status === 'done').length
 
-  const trend = days.map((d) => ({
-    day: new Date(d.start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
-    hours: Math.round((d.ms / 3_600_000) * 10) / 10,
-  }))
-
-  const from = periodStart('day', now - 6 * 86_400_000)
-  const byProject = projects
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      ms: entries.filter((e) => e.projectId === p.id).reduce((s, e) => s + overlapMs(e, from, now + 1, now), 0),
-      fill: projectColor(p),
-    }))
-    .filter((p) => p.ms > 0)
-  const pieConfig = Object.fromEntries(byProject.map((p) => [p.id, { label: p.name, color: p.fill }])) satisfies ChartConfig
-
   const delta = (a: number, b: number) => (b === 0 ? '' : `${a >= b ? '+' : '-'}${formatHours(Math.abs(a - b))} vs previous`)
   const stats = [
-    { label: 'Tracked today', value: formatHours(today), note: delta(today, yesterday) },
+    { label: 'Tracked today', value: <LiveToday tracked={tracked} yesterday={yesterday} />, note: '' },
     { label: 'Last 7 days', value: formatHours(week), note: delta(week, prevWeek) },
     { label: 'Due today', value: String(dueToday), note: `${open.length} open in total` },
     { label: 'Overdue', value: String(overdue), note: `${doneCount} completed` },
@@ -78,12 +83,6 @@ export default function Dashboard() {
           </Button>
         }
       />
-
-      {error && (
-        <p role="alert" className="border-destructive/30 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-sm">
-          {error}
-        </p>
-      )}
 
       {isNew && (
         <Card>
@@ -200,6 +199,23 @@ export default function Dashboard() {
  * Tempo's three briefings, one click each. The one that fits the moment is highlighted: plan in the morning,
  * summary in the evening, weekly review at the end of the week.
  */
+/** "Tracked today": the one figure that changes every second while a timer runs, so only it re-renders. */
+function LiveToday({ tracked, yesterday }: { tracked: TimeEntry[]; yesterday: number }) {
+  const running = tracked.some((e) => e.endedAt === null)
+  const now = useNow(running)
+  const from = periodStart('day', now)
+  let today = 0
+  for (const e of tracked) if (e.endedAt === null || e.endedAt > from) today += overlapMs(e, from, now + 1, now)
+  return (
+    <span className="flex flex-col">
+      {formatHours(today)}
+      <span className="text-muted-foreground mt-1.5 text-xs font-normal">
+        {yesterday === 0 ? ' ' : `${today >= yesterday ? '+' : '-'}${formatHours(Math.abs(today - yesterday))} vs yesterday`}
+      </span>
+    </span>
+  )
+}
+
 function TempoCard({ now }: { now: number }) {
   const d = new Date(now)
   const weekEnd = d.getDay() === 5 || d.getDay() === 6 || d.getDay() === 0

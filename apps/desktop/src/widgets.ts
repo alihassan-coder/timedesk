@@ -1,6 +1,9 @@
-import { DEFAULT_DESKTOP_SETTINGS, sanitizeFocusList, type DesktopSettings, type TimerState, type WidgetMode } from '@timedesk/shared'
+import { DEFAULT_DESKTOP_SETTINGS, sanitizeFocusList, type DesktopSettings, type TimerState, type UpdateStatus, type WidgetMode } from '@timedesk/shared'
 
-/** Pure rules for the floating timer, the window title, idle time and the settings. No Electron in here, so they are tested directly. */
+/**
+ * Pure rules for the floating timer, the window title, idle time, the tray text, update status and the settings. No Electron
+ * in here, so they are tested directly.
+ */
 
 export interface Rect {
   x: number
@@ -99,10 +102,46 @@ export function createIdleWatcher() {
       }
       return null
     },
+    /**
+     * The computer woke up or was unlocked. Returns when the person left (the earlier of going idle and going to sleep)
+     * if that was at least `limitMinutes` ago with the timer running. Either way they are back now, so idle tracking starts over.
+     */
+    resumed(suspendedAt: number, now: number, running: boolean, limitMinutes: number): { idleSince: number } | null {
+      const since = idleSince !== null ? Math.min(idleSince, suspendedAt) : suspendedAt
+      idleSince = null
+      if (!running || limitMinutes <= 0 || now - since < limitMinutes * 60_000) return null
+      return { idleSince: since }
+    },
     reset() {
       idleSince = null
     },
   }
+}
+
+/** "Timer running: Write docs (1h 05m)" or "No timer running": the tray tooltip and menu line, which only change once a minute. */
+export function trayStatus(timer: TimerState, now: number): string {
+  if (!timer.running) return 'No timer running'
+  let elapsed = ''
+  if (timer.startedAt) {
+    const mins = Math.max(0, Math.floor((now - timer.startedAt) / 60_000))
+    elapsed = mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`
+  }
+  return `Timer running: ${timer.label || 'Stopwatch'} (${elapsed})`
+}
+
+/** A failed later check must not hide an update that is already downloaded and ready to install. */
+export function mergeUpdateStatus(prev: UpdateStatus, next: UpdateStatus): UpdateStatus {
+  if (prev.state === 'ready' && next.state === 'error') return prev
+  return next
+}
+
+/**
+ * How long to wait before reloading a main window whose page crashed: at once the first time, then longer the more it
+ * has crashed in the last few minutes, so a page that crashes on load does not spin.
+ */
+export function crashReloadDelay(recentCrashes: number): number {
+  if (recentCrashes <= 1) return 0
+  return Math.min(60_000, 1000 * 2 ** (recentCrashes - 1))
 }
 
 /** "12 minutes", "1 hour 5 minutes". */

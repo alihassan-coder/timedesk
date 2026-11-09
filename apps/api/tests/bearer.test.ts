@@ -31,6 +31,11 @@ describe('token sign-in for the desktop app', () => {
     expect(made.status).toBe(201)
   })
 
+  it('a script with the token but no browser origin may make changes too', async () => {
+    const made = await t.app.request('/v1/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ title: 'From a script' }) })
+    expect(made.status).toBe(201)
+  })
+
   it('a made-up or damaged token is refused', async () => {
     for (const bad of ['not-a-real-token', token.slice(0, -4) + 'AAAA', '']) {
       const res = await t.app.request('/v1/me', { headers: headers({ Authorization: `Bearer ${bad}` }) })

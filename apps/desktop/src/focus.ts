@@ -52,6 +52,7 @@ export function createFocusGuard(opts: FocusGuardOptions) {
   const maxBuffered = opts.maxBuffered ?? 200
 
   let cur: Running | null = null
+  let paused = false
   const done: FocusSession[] = []
 
   const resetStreak = (r: Running) => {
@@ -103,6 +104,8 @@ export function createFocusGuard(opts: FocusGuardOptions) {
     async tick({ onBreak = false }: { onBreak?: boolean } = {}) {
       const r = cur
       if (!r) return
+      // Asleep or locked: nothing is counted, not even as away (the idle question after resume handles that time).
+      if (paused) return resetStreak(r)
       r.onBreak = onBreak
       if (onBreak) return resetStreak(r)
       if (opts.getIdleSeconds() >= idleLimit) {
@@ -110,7 +113,7 @@ export function createFocusGuard(opts: FocusGuardOptions) {
         return resetStreak(r)
       }
       const win = await opts.getWindow().catch(() => null)
-      if (cur !== r) return // stopped while the window was being read
+      if (cur !== r || paused) return // stopped (or the computer went to sleep) while the window was being read
       // Nothing readable (some Linux desktops): nothing to judge, so nothing is counted.
       if (!win || !win.app) return resetStreak(r)
 
@@ -136,6 +139,16 @@ export function createFocusGuard(opts: FocusGuardOptions) {
         r.nudgedAt = r.streak
         opts.nudge({ match: verdict.match, label: r.label, seconds: r.streak })
       }
+    },
+
+    /** The computer is going to sleep or locking: the distraction streak ends and ticks count nothing until resume(). */
+    pause() {
+      paused = true
+      if (cur) resetStreak(cur)
+    },
+
+    resume() {
+      paused = false
     },
 
     state(): FocusState {

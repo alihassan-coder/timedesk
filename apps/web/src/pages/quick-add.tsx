@@ -40,10 +40,12 @@ export default function QuickAddPage() {
 
   function submit() {
     if (!parsed.title) return
-    void actions.addTask({ title: parsed.title, projectId: parsed.projectId, priority: parsed.priority, due: parsed.due, recurrence: null })
-    setDone(`Added: ${parsed.title}`)
+    // Saved on this device at once, so it is never lost; it reaches the server now, or when the connection is back.
+    const id = actions.addTask({ title: parsed.title, projectId: parsed.projectId, priority: parsed.priority, due: parsed.due, recurrence: null })
+    if (!id) return
+    setDone(navigator.onLine === false ? `Saved offline: ${parsed.title}. It syncs when you are back online.` : `Added: ${parsed.title}`)
     setText('')
-    setTimeout(() => d?.closeOwnWindow(), 650)
+    setTimeout(() => d?.closeOwnWindow(), navigator.onLine === false ? 1600 : 650)
   }
 
   return (

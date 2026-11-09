@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, ExternalLink, Loader2, Trash2 } from 'lucide-react'
+import { Check, ExternalLink, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 import { Row } from '@/components/setting-row'
 import { Segmented } from '@/components/segmented'
 import { SimpleSelect } from '@/components/simple-select'
@@ -18,6 +18,11 @@ export function AiTab() {
   const prefs = useAiPrefs()
   const options = ai.providers.flatMap((g) => g.models.map((m) => ({ value: `${g.provider}:${m}`, label: `${g.name} · ${m}` })))
   const current = ai.current ? `${ai.current.provider}:${ai.current.model}` : ''
+  const [retrying, setRetrying] = useState(false)
+  const retry = () => {
+    setRetrying(true)
+    void ai.retry().finally(() => setRetrying(false))
+  }
 
   return (
     <div className="space-y-6">
@@ -30,9 +35,18 @@ export function AiTab() {
           </CardDescription>
         </CardHeader>
         <CardContent className="divide-y">
-          {PROVIDERS.map((p) => (
-            <KeyRow key={p.id} provider={p} last4={ai.keys.find((k) => k.provider === p.id)?.last4} modelCount={ai.providers.find((x) => x.provider === p.id)?.models.length} />
-          ))}
+          {ai.loadFailed ? (
+            <div role="alert" className="flex flex-wrap items-center gap-3 py-2 text-sm">
+              <span className="text-destructive">Could not load your AI keys. {ai.error}</span>
+              <Button size="sm" variant="outline" disabled={retrying} onClick={retry}>
+                {retrying ? <Loader2 className="animate-spin" /> : <RefreshCw />} Retry
+              </Button>
+            </div>
+          ) : (
+            PROVIDERS.map((p) => (
+              <KeyRow key={p.id} provider={p} last4={ai.keys.find((k) => k.provider === p.id)?.last4} modelCount={ai.providers.find((x) => x.provider === p.id)?.models.length} />
+            ))
+          )}
         </CardContent>
       </Card>
 
@@ -43,7 +57,7 @@ export function AiTab() {
         </CardHeader>
         <CardContent>
           {options.length === 0 ? (
-            <p className="text-muted-foreground text-sm">Add a key above to choose a model.</p>
+            <p className="text-muted-foreground text-sm">{ai.loadFailed ? 'Could not load your AI keys.' : 'Add a key above to choose a model.'}</p>
           ) : (
             <SimpleSelect
               className="w-full max-w-sm"
@@ -98,7 +112,7 @@ export function AiTab() {
         </CardContent>
       </Card>
 
-      <MemoryCard enabled={ai.memoryEnabled} />
+      <MemoryCard enabled={ai.memoryEnabled} unknown={ai.loadFailed} />
     </div>
   )
 }
@@ -117,8 +131,21 @@ function KeyRow({ provider, last4, modelCount }: { provider: ProviderInfo; last4
       setDraft('')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not save the key.')
+    } finally {
+      setBusy(false)
     }
-    setBusy(false)
+  }
+
+  async function remove() {
+    setBusy(true)
+    setError('')
+    try {
+      await removeKey(provider.id)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not remove the key.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -141,7 +168,7 @@ function KeyRow({ provider, last4, modelCount }: { provider: ProviderInfo; last4
         <div className="flex flex-wrap items-center gap-2">
           <code className="bg-muted rounded-md px-2 py-1 text-xs">{'•'.repeat(12)}{last4}</code>
           {modelCount ? <span className="text-muted-foreground text-xs">{modelCount} models available</span> : null}
-          <Button size="sm" variant="ghost" disabled={busy} onClick={async () => { setBusy(true); await removeKey(provider.id); setBusy(false) }}>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove()}>
             <Trash2 /> Remove
           </Button>
         </div>
@@ -164,9 +191,39 @@ function KeyRow({ provider, last4, modelCount }: { provider: ProviderInfo; last4
   )
 }
 
-function MemoryCard({ enabled }: { enabled: boolean }) {
+function MemoryCard({ enabled, unknown }: { enabled: boolean; unknown: boolean }) {
   const [items, setItems] = useState<MemoryItem[] | null>(null)
-  const load = () => listMemories().then(setItems).catch(() => setItems([]))
+  const [loading, setLoading] = useState(false)
+  const [forgetting, setForgetting] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const message = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
+
+  async function load() {
+    setLoading(true)
+    setError('')
+    try {
+      setItems(await listMemories())
+    } catch (e) {
+      // Keep the old list (or none): an empty list here would wrongly say nothing is remembered.
+      setError(message(e, 'Could not load what the assistant remembers.'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function forget(id: string) {
+    setForgetting(id)
+    setError('')
+    try {
+      await forgetMemory(id)
+      setItems((list) => list?.filter((m) => m.id !== id) ?? null)
+    } catch (e) {
+      setError(message(e, 'Could not forget that.'))
+    } finally {
+      setForgetting(null)
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -176,11 +233,13 @@ function MemoryCard({ enabled }: { enabled: boolean }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {!enabled ? (
+        {unknown ? (
+          <p className="text-muted-foreground text-sm">Could not check whether memory is on.</p>
+        ) : !enabled ? (
           <p className="text-muted-foreground text-sm">Memory is off. Add an OpenAI key above to turn it on.</p>
         ) : items === null ? (
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            Show what it remembers
+          <Button variant="outline" size="sm" disabled={loading} onClick={() => void load()}>
+            {loading && <Loader2 className="animate-spin" />} {error ? 'Try again' : 'Show what it remembers'}
           </Button>
         ) : items.length === 0 ? (
           <p className="text-muted-foreground text-sm">Nothing remembered yet.</p>
@@ -189,12 +248,17 @@ function MemoryCard({ enabled }: { enabled: boolean }) {
             {items.map((m) => (
               <li key={m.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
                 {m.text}
-                <Button size="icon-sm" variant="ghost" aria-label="Forget" onClick={async () => { await forgetMemory(m.id); await load() }}>
-                  <Trash2 />
+                <Button size="icon-sm" variant="ghost" aria-label="Forget" disabled={forgetting === m.id} onClick={() => void forget(m.id)}>
+                  {forgetting === m.id ? <Loader2 className="animate-spin" /> : <Trash2 />}
                 </Button>
               </li>
             ))}
           </ul>
+        )}
+        {error && (
+          <p role="alert" className="text-destructive text-sm">
+            {error}
+          </p>
         )}
       </CardContent>
     </Card>

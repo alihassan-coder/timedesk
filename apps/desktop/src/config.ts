@@ -97,3 +97,17 @@ export function contentSecurityPolicy(apiUrl: string | null): string {
     "form-action 'self'",
   ].join('; ')
 }
+
+/**
+ * On a Linux Wayland session the app runs through XWayland unless told otherwise, because always-on-top, placing the
+ * floating timer and reading the window in front (active-win) only work there. TIMEDESK_WAYLAND=1, an --ozone-platform
+ * flag or ELECTRON_OZONE_PLATFORM_HINT keeps whatever was asked for. Returns the platform to force, and why (for the log).
+ */
+export function linuxOzonePlatform(src: { platform: string; env: Record<string, string | undefined>; argv: string[] }): { force: 'x11' | null; reason: string } {
+  if (src.platform !== 'linux') return { force: null, reason: 'not linux' }
+  if ((src.env.XDG_SESSION_TYPE ?? '').toLowerCase() !== 'wayland') return { force: null, reason: `session type ${src.env.XDG_SESSION_TYPE || 'unknown'}` }
+  if (src.env.TIMEDESK_WAYLAND === '1') return { force: null, reason: 'native Wayland (TIMEDESK_WAYLAND=1)' }
+  if (src.argv.some((a) => a.startsWith('--ozone-platform'))) return { force: null, reason: 'native choice from the command line' }
+  if (src.env.ELECTRON_OZONE_PLATFORM_HINT) return { force: null, reason: `ELECTRON_OZONE_PLATFORM_HINT=${src.env.ELECTRON_OZONE_PLATFORM_HINT}` }
+  return { force: 'x11', reason: 'Wayland session: using XWayland so the floating timer and app tracking work' }
+}

@@ -45,9 +45,10 @@ function EventForm({ event, defaultDay, onClose, onChanged }: { event: CalendarE
   // All-day: dates, with the last day included (Google stores the day after, we show what people expect).
   const [startDay, setStartDay] = useState(event ? (event.allDay ? event.start : toDateKey(new Date(event.start).getTime())) : defaultDay)
   const [endDay, setEndDay] = useState(event?.allDay ? (event.end > event.start ? addDays(event.end, -1) : event.start) : event ? toDateKey(new Date(event.end).getTime()) : defaultDay)
-  // Timed: date and time together.
-  const [startAt, setStartAt] = useState(event && !event.allDay ? toLocalInput(new Date(event.start)) : atHour(defaultDay, 9))
-  const [endAt, setEndAt] = useState(event && !event.allDay ? toLocalInput(new Date(event.end)) : atHour(defaultDay, 10))
+  // Timed: date and time together. An all-day event switched to timed starts on its own first day, not on defaultDay.
+  const timedDay = event?.allDay ? event.start : defaultDay
+  const [startAt, setStartAt] = useState(event && !event.allDay ? toLocalInput(new Date(event.start)) : atHour(timedDay, 9))
+  const [endAt, setEndAt] = useState(event && !event.allDay ? toLocalInput(new Date(event.end)) : atHour(timedDay, 10))
 
   const [busy, setBusy] = useState<'save' | 'delete' | ''>('')
   const [confirmDelete, setConfirmDelete] = useState(false)

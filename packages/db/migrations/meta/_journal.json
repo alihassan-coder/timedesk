@@ -43,6 +43,13 @@
       "when": 1793967306336,
       "tag": "0005_focus_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794201184987,
+      "tag": "0006_multitask_and_custom_colors",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label'
 import { authClient } from '@/lib/auth-client'
 import { getLoginNotice, setLoginNotice } from '@/lib/account'
 
+const OFFLINE = 'Could not reach the server. Check your connection and try again.'
+
 export default function LoginPage() {
   const navigate = useNavigate()
   /** A one-time message, for example after the account was deleted. */
@@ -23,16 +25,22 @@ export default function LoginPage() {
     setError('')
     setBusy(true)
     const id = login.trim()
-    // People can type either their username or their email.
-    const { error: err } = id.includes('@')
-      ? await authClient.signIn.email({ email: id, password })
-      : await authClient.signIn.username({ username: id, password })
-    setBusy(false)
-    if (err) {
-      setError(err.message ?? 'Could not sign in. Check your details and try again.')
-      return
+    try {
+      // People can type either their username or their email.
+      const { error: err } = id.includes('@')
+        ? await authClient.signIn.email({ email: id, password })
+        : await authClient.signIn.username({ username: id, password })
+      if (err) {
+        setError(err.message ?? 'Could not sign in. Check your details and try again.')
+        return
+      }
+      navigate('/', { replace: true })
+    } catch {
+      // The auth client throws when the request never reached the server.
+      setError(OFFLINE)
+    } finally {
+      setBusy(false)
     }
-    navigate('/', { replace: true })
   }
 
   return (

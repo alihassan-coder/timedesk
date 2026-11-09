@@ -41,12 +41,19 @@ export const SUGGESTED_MODELS: Record<AiProvider, string[]> = {
   xai: ['grok-4', 'grok-3-mini'],
 }
 
-/** Lists model ids that a key can use. Never throws: on any problem it returns the suggestions. */
+/** How long a provider gets to list its models before the suggestions are used instead. */
+const LIST_TIMEOUT_MS = 5_000
+
+/**
+ * Lists model ids that a key can use. Never throws and never hangs: on any problem, including a provider that does not
+ * answer within 5 seconds, it returns the suggestions.
+ */
 export async function listModels(provider: AiProvider, apiKey: string): Promise<string[]> {
   const fallback = SUGGESTED_MODELS[provider]
+  const signal = AbortSignal.timeout(LIST_TIMEOUT_MS)
   try {
     if (provider === 'google') {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=100`, { headers: { 'x-goog-api-key': apiKey } })
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=100`, { headers: { 'x-goog-api-key': apiKey }, signal })
       if (!res.ok) return fallback
       const json = (await res.json()) as { models?: { name: string; supportedGenerationMethods?: string[] }[] }
       const ids = (json.models ?? [])
@@ -63,7 +70,7 @@ export async function listModels(provider: AiProvider, apiKey: string): Promise<
     } as const
     const headers: Record<string, string> =
       provider === 'anthropic' ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' } : { Authorization: `Bearer ${apiKey}` }
-    const res = await fetch(urls[provider], { headers })
+    const res = await fetch(urls[provider], { headers, signal })
     if (!res.ok) return fallback
     const json = (await res.json()) as { data?: { id: string }[] }
     let ids = (json.data ?? []).map((m) => m.id)
@@ -71,6 +78,7 @@ export async function listModels(provider: AiProvider, apiKey: string): Promise<
     if (provider === 'groq') ids = ids.filter((id) => !/(whisper|tts|guard|playai|orpheus|transcribe)/.test(id))
     return ids.length ? ids.sort() : fallback
   } catch {
+    // Network failure, a timeout (the abort also stops reading a slow body), or an answer that is not JSON.
     return fallback
   }
 }

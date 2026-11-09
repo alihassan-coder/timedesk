@@ -159,6 +159,22 @@ describe('focus guard', () => {
   })
 })
 
+describe('focus guard and sleep', () => {
+  it('counts nothing while the computer sleeps, and a distraction streak does not carry over', async () => {
+    const t = setup({ nudgeSeconds: 15 })
+    t.guard.start('1', 'Write docs')
+    t.show({ app: 'Discord', title: 'chat' })
+    await t.run(2) // 10 s distracted
+    t.guard.pause()
+    await t.run(10)
+    expect(t.guard.state()).toMatchObject({ distractedSeconds: 10, streakSeconds: 0, distracted: false })
+    t.guard.resume()
+    await t.run(2) // 10 s more: a fresh streak, below the 15 s nudge
+    expect(t.nudges).toEqual([])
+    expect(t.guard.state()).toMatchObject({ distractedSeconds: 20, streakSeconds: 10 })
+  })
+})
+
 describe('focus guard settings', () => {
   it('is off by default, with starter lists', () => {
     expect(DEFAULT_DESKTOP_SETTINGS).toMatchObject({ focusGuard: false, focusNudgeSeconds: 15 })

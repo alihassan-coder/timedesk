@@ -122,3 +122,37 @@ export function scriptedModel(steps: unknown[][]) {
   })
   return { model, prompts }
 }
+
+/**
+ * Sends a chat and, like a person pressing "Allow" in the app, approves every action Tempo asks about, then sends it
+ * back, until Tempo is done. Returns everything streamed, so tests can look for the final answer.
+ */
+export async function chatAllowingAll(a: ReturnType<typeof api>, body: { messages: unknown[] } & Record<string, unknown>): Promise<string> {
+  const { readUIMessageStream } = await import('ai')
+  type Msg = { id: string; role: string; parts: { state?: string; approval?: Record<string, unknown> }[] }
+  let messages = [...body.messages] as Msg[]
+  let all = ''
+  for (let round = 0; round < 8; round++) {
+    const raw = await (await a.post('/assistant/chat', { ...body, messages })).text()
+    all += raw
+    const chunks = raw
+      .split('\n')
+      .filter((l) => l.startsWith('data: ') && l !== 'data: [DONE]')
+      .map((l) => JSON.parse(l.slice(6)))
+    const stream = new ReadableStream({
+      start(c) {
+        for (const x of chunks) c.enqueue(x)
+        c.close()
+      },
+    })
+    const prev = messages[messages.length - 1]
+    let msg: Msg | undefined
+    for await (const m of readUIMessageStream({ stream, message: prev.role === 'assistant' ? (structuredClone(prev) as never) : undefined })) msg = m as unknown as Msg
+    if (!msg) break
+    const waiting = msg.parts.some((p) => p.state === 'approval-requested')
+    msg = { ...msg, parts: msg.parts.map((p) => (p.state === 'approval-requested' ? { ...p, state: 'approval-responded', approval: { ...p.approval, approved: true } } : p)) }
+    messages = prev.role === 'assistant' ? [...messages.slice(0, -1), msg] : [...messages, msg]
+    if (!waiting) break
+  }
+  return all
+}

@@ -25,6 +25,8 @@ export const projects = pgTable(
     name: text('name').notNull(),
     description: text('description').notNull().default(''),
     color: integer('color').notNull().default(1),
+    /** A colour the person picked (#rrggbb). Wins over the preset in `color`. */
+    customColor: text('custom_color'),
     ...stamps,
   },
   (t) => [index('projects_workspace_idx').on(t.workspaceId)],
@@ -69,8 +71,8 @@ export const timeEntries = pgTable(
   },
   (t) => [
     index('time_entries_user_started_idx').on(t.userId, t.startedAt),
-    // At most one running timer per user.
-    uniqueIndex('time_entries_one_running_per_user')
+    // Several timers may run at once (multitasking). This keeps finding the running ones fast.
+    index('time_entries_running_idx')
       .on(t.userId)
       .where(sql`${t.endedAt} is null and ${t.deletedAt} is null`),
   ],

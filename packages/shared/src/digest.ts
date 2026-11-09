@@ -1,4 +1,5 @@
 import { dueBucketOn } from './tasks.ts'
+import { splitParallel } from './parallel.ts'
 import { overlapMs } from './time.ts'
 import type { DueBucket, Priority, TaskStatus, TimeEntry } from './types.ts'
 
@@ -62,14 +63,17 @@ export function buildDigest(input: {
   projects: DigestProject[]
   now: number
 }): Digest {
-  const { days, entries, tasks, projects, now } = input
+  const { days, tasks, projects, now } = input
+  const entries = input.entries.filter((e) => e.share === undefined)
+  // Totals use shared time (several timers at once count once in total); sessions count the real timers.
+  const pieces = splitParallel(entries)
   if (days.length === 0) throw new Error('A digest needs at least one day.')
   const from = days[0].start
   const to = days[days.length - 1].end
   const names = new Map(projects.map((p) => [p.id, p.name]))
   const nameOf = (id: string | null) => (id ? (names.get(id) ?? NO_PROJECT) : NO_PROJECT)
 
-  const byDay = trackedIn(entries, days, now)
+  const byDay = trackedIn(pieces, days, now)
   const totalMs = byDay.reduce((s, d) => s + d.ms, 0)
 
   const perProject = new Map<string | null, number>()
@@ -80,6 +84,10 @@ export function buildDigest(input: {
     if (ms <= 0) continue
     sessions++
     longestSessionMs = Math.max(longestSessionMs, ms)
+  }
+  for (const e of pieces) {
+    const ms = overlapMs(e, from, to, now)
+    if (ms <= 0) continue
     // A project that was deleted counts as "no project", like it does in the rest of the app.
     const key = e.projectId && names.has(e.projectId) ? e.projectId : null
     perProject.set(key, (perProject.get(key) ?? 0) + ms)
@@ -99,7 +107,7 @@ export function buildDigest(input: {
     from: days[0].key,
     to: days[days.length - 1].key,
     totalMs,
-    previousTotalMs: input.previousDays ? trackedIn(entries, input.previousDays, now).reduce((s, d) => s + d.ms, 0) : null,
+    previousTotalMs: input.previousDays ? trackedIn(pieces, input.previousDays, now).reduce((s, d) => s + d.ms, 0) : null,
     byProject,
     byDay,
     bestDay: best,

@@ -1,20 +1,22 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { and, eq, isNull, ne } from 'drizzle-orm'
+import { and, eq, gt, isNull, like, lt, ne } from 'drizzle-orm'
 import { addDays, type CalendarEvent, type GoogleStatus, type GoogleSyncResult } from '@timedesk/shared'
 import { schema, type Db } from '@timedesk/db'
 import {
   GoogleApiError,
   GoogleAuthError,
   GoogleUnauthorizedError,
+  GoogleUnreachableError,
   type GoogleConfig,
   type GoogleEvent,
   type GoogleEventInput,
 } from '../lib/google.ts'
 import { decryptSecret, encryptSecret } from '../utils/crypto.ts'
-import { badGateway, badRequest, conflict, notFound } from '../utils/errors.ts'
+import { badGateway, badRequest, conflict, gatewayTimeout, notFound, unavailable, unprocessable } from '../utils/errors.ts'
 import type { CreateCalendarEvent, UpdateCalendarEvent } from '../validators/index.ts'
 
 const conns = schema.googleConnections
+const verification = schema.verification
 const links = schema.googleTaskLinks
 const tasks = schema.tasks
 
@@ -23,7 +25,10 @@ type Connection = typeof conns.$inferSelect
 
 const STATE_TTL_MS = 10 * 60 * 1000
 const DONE_MARK = '✓ ' // a check mark in front of the title of a finished task
-const MAX_TASKS_PER_PUSH = 200
+/** Tasks mirrored per request. Each is a call to Google, and a request must finish well within the function time limit. */
+const MAX_TASKS_PER_PUSH = 25
+/** One-time connect tickets live in Better Auth's verification table (no table of our own needed) under this prefix. */
+const TICKET_PREFIX = 'google-connect:'
 /**
  * When a mirrored event is deleted in Google, the link is kept with this id instead of being removed, so
  * "Sync now" does not put the event back. The next change to the task makes a fresh event.
@@ -31,6 +36,23 @@ const MAX_TASKS_PER_PUSH = 200
 const deletedMarker = (taskId: string) => `deleted:${taskId}`
 const isDeleted = (link: { googleEventId: string }) => link.googleEventId.startsWith('deleted:')
 const dayOnly = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * A failure talking to Google, as an answer the app can show: unreachable 502, too slow 504, a request Google
+ * refused 422, rate limited or forbidden 503, anything else 502. Other errors (ours, or bugs) pass through untouched.
+ */
+function googleFailure(e: unknown): unknown {
+  if (e instanceof GoogleUnreachableError) {
+    return e.timeout ? gatewayTimeout('Google Calendar took too long to answer. Try again in a moment.') : badGateway('Could not reach Google Calendar. Try again in a moment.')
+  }
+  if (e instanceof GoogleApiError) {
+    if (e.status === 400) return unprocessable('Google Calendar did not accept that. Check the dates, time zone and title.')
+    if (e.status === 403 || e.status === 429) return unavailable('Google Calendar is limiting requests right now. Try again in a few minutes.')
+    return badGateway('Google Calendar did not answer. Try again in a moment.')
+  }
+  if (e instanceof GoogleUnauthorizedError) return badGateway('Google Calendar did not answer. Try again in a moment.')
+  return e
+}
 
 /** The person has to connect again: Google no longer accepts the saved permission. */
 export const RECONNECT_MESSAGE = 'Google no longer allows timedesk to use your calendar. Connect Google Calendar again in Settings.'
@@ -50,11 +72,27 @@ export function createGoogleCalendarService(db: Db, secret: string, webOrigin: s
   // ---- signed state for the OAuth round trip ----
   const stateKey = () => createHmac('sha256', secret).update('google-oauth-state').digest()
   const sign = (payload: string) => createHmac('sha256', stateKey()).update(payload).digest('base64url')
-  function makeState(userId: string, desktop: boolean): string {
-    const payload = Buffer.from(JSON.stringify({ u: userId, d: desktop, e: now().getTime() + STATE_TTL_MS, n: randomBytes(8).toString('hex') })).toString('base64url')
+  /**
+   * The state names the person and expires in 10 minutes, and is signed so it cannot be forged. Its nonce is also stored
+   * as a one-time ticket, so the same state cannot be used twice.
+   */
+  async function makeState(userId: string, desktop: boolean): Promise<string> {
+    const nonce = randomBytes(16).toString('hex')
+    const expiresAt = new Date(now().getTime() + STATE_TTL_MS)
+    await db.delete(verification).where(and(like(verification.identifier, `${TICKET_PREFIX}%`), lt(verification.expiresAt, now())))
+    await db.insert(verification).values({ id: crypto.randomUUID(), identifier: TICKET_PREFIX + nonce, value: userId, expiresAt })
+    const payload = Buffer.from(JSON.stringify({ u: userId, d: desktop, e: expiresAt.getTime(), n: nonce })).toString('base64url')
     return `${payload}.${sign(payload)}`
   }
-  function readState(state: string | undefined): { userId: string; desktop: boolean } | null {
+  /** Uses up the ticket of a state. True only the first time, for the person it was made for, before it expires. */
+  async function redeem(nonce: string, userId: string): Promise<boolean> {
+    const used = await db
+      .delete(verification)
+      .where(and(eq(verification.identifier, TICKET_PREFIX + nonce), eq(verification.value, userId), gt(verification.expiresAt, now())))
+      .returning({ id: verification.id })
+    return used.length > 0
+  }
+  function readState(state: string | undefined): { userId: string; desktop: boolean; nonce: string } | null {
     if (!state) return null
     const [payload, mac] = state.split('.')
     if (!payload || !mac) return null
@@ -62,9 +100,9 @@ export function createGoogleCalendarService(db: Db, secret: string, webOrigin: s
     const given = Buffer.from(mac)
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null
     try {
-      const v = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { u?: string; d?: boolean; e?: number }
-      if (!v.u || typeof v.e !== 'number' || v.e < now().getTime()) return null
-      return { userId: v.u, desktop: v.d === true }
+      const v = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { u?: string; d?: boolean; e?: number; n?: string }
+      if (!v.u || !v.n || typeof v.e !== 'number' || v.e < now().getTime()) return null
+      return { userId: v.u, desktop: v.d === true, nonce: v.n }
     } catch {
       return null
     }
@@ -117,8 +155,7 @@ export function createGoogleCalendarService(db: Db, secret: string, webOrigin: s
         return await fn(await refresh(), conn) // the token was cut short: one fresh one, one retry
       }
     } catch (e) {
-      if (e instanceof GoogleApiError || e instanceof GoogleUnauthorizedError) throw badGateway('Google Calendar did not answer. Try again in a moment.')
-      throw e
+      throw googleFailure(e)
     }
   }
 
@@ -199,24 +236,32 @@ export function createGoogleCalendarService(db: Db, secret: string, webOrigin: s
     await db.delete(links).where(eq(links.taskId, taskId))
   }
 
-  /** Never lets a Google problem break saving a task. */
-  const safely = async (what: string, fn: () => Promise<void>) => {
+  /** Never lets a Google problem break saving a task. True when it worked. */
+  const safely = async (what: string, fn: () => Promise<void>): Promise<boolean> => {
     try {
       await fn()
+      return true
     } catch (e) {
       console.error(`Google Calendar: could not ${what}:`, e instanceof Error ? e.message : 'unknown error')
+      return false
     }
   }
 
-  async function pushMissing(userId: string): Promise<number> {
-    const linked = (await db.select({ taskId: links.taskId }).from(links).where(eq(links.userId, userId))).map((l) => l.taskId)
+  /**
+   * Mirrors open tasks that have no event yet, a few per request. One task Google refuses is logged and skipped; it
+   * does not stop the others. `remaining` says how many are left for the next sync.
+   */
+  async function pushMissing(userId: string): Promise<{ pushed: number; remaining: number }> {
+    const linked = new Set((await db.select({ taskId: links.taskId }).from(links).where(eq(links.userId, userId))).map((l) => l.taskId))
     const open = await db
       .select()
       .from(tasks)
       .where(and(eq(tasks.userId, userId), isNull(tasks.deletedAt), ne(tasks.status, 'done')))
-    const todo = open.filter((t) => t.due && !linked.includes(t.id)).slice(0, MAX_TASKS_PER_PUSH)
-    for (const t of todo) await mirrorTaskNow(userId, t)
-    return todo.length
+    const missing = open.filter((t) => t.due && !linked.has(t.id))
+    const thisTime = missing.slice(0, MAX_TASKS_PER_PUSH)
+    let pushed = 0
+    for (const t of thisTime) if (await safely('mirror a task', () => mirrorTaskNow(userId, t))) pushed++
+    return { pushed, remaining: missing.length - pushed }
   }
 
   return {
@@ -233,18 +278,31 @@ export function createGoogleCalendarService(db: Db, secret: string, webOrigin: s
       }
     },
 
-    /** The Google sign-in address for this person. The state ties the round trip to them and expires in 10 minutes. */
-    connectUrl(userId: string, desktop: boolean): { url: string } {
+    /** The Google sign-in address for this person. The state ties the round trip to them, works once and expires in 10 minutes. */
+    async connectUrl(userId: string, desktop: boolean): Promise<{ url: string }> {
       const g = need()
-      return { url: g.client.authUrl({ redirectUri: g.redirectUri, state: makeState(userId, desktop) }) }
+      return { url: g.client.authUrl({ redirectUri: g.redirectUri, state: await makeState(userId, desktop) }) }
     },
 
-    /** Google sends the browser back here. There is no session on this request, so the signed state is the proof of who started it. */
-    async finishConnect(input: { code?: string; state?: string; error?: string }): Promise<{ ok: boolean; desktop: boolean; redirect: string }> {
+    /**
+     * Google sends the browser back here. The signed state says who started the flow, and it works only once.
+     *
+     * So that nobody can start a flow on their own account and trick someone else into finishing it (which would attach
+     * the victim's Google Calendar to the attacker's account), the browser flow also needs the login cookie of that same
+     * person on this request. The desktop app signs in with a token, which the system browser does not have, so there
+     * only a different signed-in person is refused. What that leaves open: someone who is NOT signed in to timedesk in
+     * their browser and is tricked into finishing another person's desktop link would attach their calendar to that
+     * person. Closing it needs a confirmation step (or a desktop loopback redirect), not just the state.
+     */
+    async finishConnect(input: { code?: string; state?: string; error?: string; sessionUserId?: string }): Promise<{ ok: boolean; desktop: boolean; redirect: string }> {
       const state = readState(input.state)
       const back = (ok: boolean) => `${webOrigin}/settings?tab=calendar&google=${ok ? 'connected' : 'error'}`
       if (!state) return { ok: false, desktop: false, redirect: back(false) }
-      if (input.error || !input.code || !google) return { ok: false, desktop: state.desktop, redirect: back(false) }
+      const fail = { ok: false, desktop: state.desktop, redirect: back(false) }
+      if (input.error || !input.code || !google) return fail
+      const samePerson = state.desktop ? !input.sessionUserId || input.sessionUserId === state.userId : input.sessionUserId === state.userId
+      if (!samePerson) return fail
+      if (!(await redeem(state.nonce, state.userId))) return fail // used already, or expired
       try {
         const t = await google.client.exchangeCode({ code: input.code, redirectUri: google.redirectUri })
         const existing = await connectionOf(state.userId)
@@ -284,7 +342,7 @@ export function createGoogleCalendarService(db: Db, secret: string, webOrigin: s
       const conn = await connectionOf(userId)
       if (!conn) throw conflict('Google Calendar is not connected.', { code: 'google_not_connected' })
       await db.update(conns).set({ pushTasks, updatedAt: now() }).where(eq(conns.userId, userId))
-      if (pushTasks) await pushMissing(userId)
+      if (pushTasks) await pushMissing(userId) // the rest, if there are many, follow with the next sync
     },
 
     async listEvents(userId: string, range: { from: Date; to: Date }): Promise<CalendarEvent[]> {
@@ -326,18 +384,24 @@ export function createGoogleCalendarService(db: Db, secret: string, webOrigin: s
     },
 
     /** Called after a task is created or changed. A Google problem is logged and never fails the task. */
-    mirrorTask: (userId: string, task: Task) => safely('mirror a task', () => mirrorTaskNow(userId, task)),
-    unmirrorTask: (userId: string, taskId: string) => safely('remove a task mirror', () => removeMirror(userId, taskId)),
+    mirrorTask: async (userId: string, task: Task) => void (await safely('mirror a task', () => mirrorTaskNow(userId, task))),
+    unmirrorTask: async (userId: string, taskId: string) => void (await safely('remove a task mirror', () => removeMirror(userId, taskId))),
 
     /**
      * Brings Google's changes in: a mirrored event that was moved or renamed in Google updates its
      * task, and one deleted in Google drops its link (the task stays). Then mirrors tasks that have no event yet.
      */
-    async sync(userId: string): Promise<GoogleSyncResult> {
+    async sync(userId: string): Promise<GoogleSyncResult & { remaining: number }> {
+      // Where the next sync starts. When Google had more changes than one listing reads, only as far as was read.
+      let syncedUpTo = now()
       const result = await withGoogle(userId, async (token, c) => {
         const since = new Date((c.lastSyncAt ?? new Date(now().getTime() - 30 * 86_400_000)).getTime() - 60_000)
         const changed = await need().client.listEvents(token, c.calendarId, { updatedMin: since.toISOString(), privateProp: 'timedeskManaged=1', showDeleted: true })
         const out: GoogleSyncResult = { checked: 0, updatedTasks: 0, pushed: 0, unlinked: 0 }
+        if (changed.more) {
+          const last = Math.max(...changed.map((e) => Date.parse(e.updated ?? '')).filter((t) => Number.isFinite(t)))
+          syncedUpTo = Number.isFinite(last) ? new Date(last) : (c.lastSyncAt ?? since)
+        }
 
         for (const e of changed) {
           const taskId = e.extendedProperties?.private?.timedeskTaskId
@@ -371,9 +435,11 @@ export function createGoogleCalendarService(db: Db, secret: string, webOrigin: s
       })
 
       const conn = await connectionOf(userId)
-      if (conn?.pushTasks) result.pushed = await pushMissing(userId)
-      await db.update(conns).set({ lastSyncAt: now(), updatedAt: now() }).where(eq(conns.userId, userId))
-      return result
+      let remaining = 0
+      if (conn?.pushTasks) ({ pushed: result.pushed, remaining } = await pushMissing(userId))
+      await db.update(conns).set({ lastSyncAt: syncedUpTo, updatedAt: now() }).where(eq(conns.userId, userId))
+      // `remaining` is new: tasks still waiting to be mirrored (older apps ignore it). Sync again to send them.
+      return { ...result, remaining }
     },
 
     /** Used by tests and clean-up: how many tasks of this person are mirrored. */

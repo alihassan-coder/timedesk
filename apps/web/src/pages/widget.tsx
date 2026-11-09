@@ -8,10 +8,12 @@ import {
   overlapMs,
   periodStart,
   pomodoroPhase,
+  runningEntries,
   type DesktopSettings,
   type WidgetMode,
 } from '@timedesk/shared'
 import { ProjectDot } from '@/components/project-dot'
+import { timersLabel } from '@/lib/timers-label'
 import { useFocusState } from '@/features/focus'
 import { clockOf } from '@/lib/clock'
 import { actions, bindStore, lastTimerTarget, loadStore, setMutationHook, useStore } from '@/data/store'
@@ -63,7 +65,7 @@ export default function WidgetPage() {
   const d = getDesktop()
   const userId = user?.id
   const { settings, setMode } = useWidgetSettings()
-  const { entries, tasks, projects, ready } = useStore()
+  const { entries, tracked, tasks, projects, ready } = useStore()
   const prefs = useTimerPrefs()
   const focus = useFocusState()
   useAppearance() // applies the saved theme to this window too
@@ -72,11 +74,16 @@ export default function WidgetPage() {
   useEffect(() => {
     if (!userId) return
     bindStore(userId)
-    const t = setInterval(() => void loadStore(), 5000)
+    // The main window says at once when it changes something, so this only needs a slow safety net (and a refresh
+    // when the window becomes visible), not a full reload of the database every few seconds.
+    const t = setInterval(() => void loadStore(), 60_000)
+    const onVisible = () => document.visibilityState === 'visible' && void loadStore()
+    document.addEventListener('visibilitychange', onVisible)
     const off = d?.onDataChanged(() => void loadStore())
     setMutationHook(() => d?.dataChanged())
     return () => {
       clearInterval(t)
+      document.removeEventListener('visibilitychange', onVisible)
       off?.()
       setMutationHook(null)
     }
@@ -88,17 +95,19 @@ export default function WidgetPage() {
     document.body.style.overflow = 'hidden'
   }, [])
 
-  const running = entries.find((e) => e.endedAt === null)
+  const timers = runningEntries(entries)
+  // The newest timer is the one shown big; others running alongside are named next to it.
+  const running = timers[0]
   const now = useNow(true)
   const task = running ? tasks.find((t) => t.id === running.taskId) : undefined
   const project = projects.find((p) => p.id === (running?.projectId ?? task?.projectId))
-  const label = running ? (task?.title ?? project?.name ?? 'Stopwatch') : 'Not tracking'
+  const label = running ? (timers.length > 1 ? timersLabel(timers, tasks, projects) : (task?.title ?? project?.name ?? 'Stopwatch')) : 'Not tracking'
   const clock = formatDuration(running ? entryDuration(running, now) : 0)
 
   const today = useMemo(() => {
     const from = periodStart('day', now)
-    return entries.reduce((sum, e) => sum + overlapMs(e, from, now + 1, now), 0)
-  }, [entries, now])
+    return tracked.reduce((sum, e) => sum + overlapMs(e, from, now + 1, now), 0)
+  }, [tracked, now])
   const goalMs = prefs.dailyGoalMinutes * 60_000
   const goalPct = goalMs > 0 ? Math.min(100, Math.round((today / goalMs) * 100)) : 0
 

@@ -64,9 +64,12 @@ export function createControllers(s: Services) {
 
     time: {
       list: async (c: C) => c.json({ entries: await s.time.list(c.get('user').id, parseQuery(c, v.timeRange)) }),
-      running: async (c: C) => c.json({ entry: await s.time.running(c.get('user').id) }),
+      running: async (c: C) => {
+        const entries = await s.time.runningAll(c.get('user').id)
+        return c.json({ entry: entries[0] ?? null, entries })
+      },
       start: async (c: C) => c.json({ entry: await s.time.start(c.get('user'), await parseBody(c, v.startTimer)) }, 201),
-      stop: async (c: C) => c.json({ entry: await s.time.stop(c.get('user').id, (await parseBody(c, v.stopTimer)).endedAt) }),
+      stop: async (c: C) => c.json({ entry: await s.time.stop(c.get('user').id, await parseBody(c, v.stopTimer)) }),
     },
 
     activity: {
@@ -89,7 +92,7 @@ export function createControllers(s: Services) {
 
     google: {
       status: async (c: C) => c.json(await s.calendar.status(c.get('user').id)),
-      connect: async (c: C) => c.json(s.calendar.connectUrl(c.get('user').id, (await parseBody(c, v.googleConnectBody)).desktop)),
+      connect: async (c: C) => c.json(await s.calendar.connectUrl(c.get('user').id, (await parseBody(c, v.googleConnectBody)).desktop)),
       settings: async (c: C) => {
         await s.calendar.setPushTasks(c.get('user').id, (await parseBody(c, v.googleSettingsPatch)).pushTasks)
         return c.json(await s.calendar.status(c.get('user').id))
@@ -98,9 +101,10 @@ export function createControllers(s: Services) {
         await s.calendar.disconnect(c.get('user').id)
         return c.body(null, 204)
       },
-      /** Public: Google sends the browser here. The signed state says who started it. */
+      /** Public: Google sends the browser here. The signed state says who started it; the login cookie, if any, must be theirs. */
       callback: async (c: C) => {
-        const done = await s.calendar.finishConnect({ code: c.req.query('code'), state: c.req.query('state'), error: c.req.query('error') })
+        const sessionUserId = (c.get('user') as AppEnv['Variables']['user'] | undefined)?.id
+        const done = await s.calendar.finishConnect({ code: c.req.query('code'), state: c.req.query('state'), error: c.req.query('error'), sessionUserId })
         if (!done.desktop) return c.redirect(done.redirect, 302)
         return c.html(
           `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>timedesk</title><body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center"><main><h1 style="font-size:1.25rem">${done.ok ? 'Connected' : 'Could not connect'}</h1><p>${done.ok ? 'Google Calendar is connected. You can close this tab and return to timedesk.' : 'Google Calendar could not be connected. Close this tab, go back to timedesk and try again.'}</p></main></body>`,
@@ -143,7 +147,8 @@ export function createControllers(s: Services) {
         const ok = await s.assistant.forget(c.get('user').id, parseParams(c, v.idParam).id)
         return ok ? c.body(null, 204) : c.json({ error: 'Memory not found.' }, 404)
       },
-      chat: async (c: C) => s.assistant.chat(c.get('user'), (await parseBody(c, v.chatBody)) as unknown as Parameters<typeof s.assistant.chat>[1]),
+      // The request's signal ends generation when the person closes the tab or stops the answer.
+      chat: async (c: C) => s.assistant.chat(c.get('user'), (await parseBody(c, v.chatBody)) as unknown as Parameters<typeof s.assistant.chat>[1], c.req.raw.signal),
     },
 
     aiKeys: {

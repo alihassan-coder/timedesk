@@ -6,13 +6,13 @@ import { pathToFileURL } from 'node:url'
 import { resolveAppFile } from './app-files.ts'
 import { linuxAutostartEntry, linuxAutostartPath } from './autostart.ts'
 import { DEFAULT_DESKTOP_SETTINGS, IPC, type AppInfo, type DesktopSettings, type TimerState, type UpdateStatus } from './bridge.ts'
-import { APP_ORIGIN, contentSecurityPolicy, isInternalUrl, isSafeExternalUrl, resolveConfig } from './config.ts'
+import { APP_ORIGIN, contentSecurityPolicy, isInternalUrl, isSafeExternalUrl, linuxOzonePlatform, resolveConfig } from './config.ts'
 import { pomodoroPhase, type FocusSession } from '@timedesk/shared'
 import { createFocusGuard } from './focus.ts'
 import { createTracker, type ActivitySample, type ForegroundWindow } from './tracker.ts'
 import { createTray } from './tray.ts'
 import { setupUpdater } from './updater.ts'
-import { anchorOf, anchorOnScreen, createIdleWatcher, describeAway, sanitizeDesktopSettings, shouldShowWidget, widgetBounds, windowTitle, type Rect } from './widgets.ts'
+import { anchorOf, anchorOnScreen, crashReloadDelay, createIdleWatcher, describeAway, mergeUpdateStatus, sanitizeDesktopSettings, shouldShowWidget, widgetBounds, windowTitle, type Rect } from './widgets.ts'
 import { sanitizeBounds, type Bounds } from './window-state.ts'
 
 // Running from source gets its own ID, so Windows never mixes it up with (or reuses a stale icon from) an installed copy.
@@ -29,6 +29,11 @@ app.setAppUserModelId(APP_ID) // needed for Windows notifications
 if (process.platform === 'linux' && process.env.APPIMAGE) app.commandLine.appendSwitch('no-sandbox')
 
 const log = (msg: string) => console.log(`[timedesk] ${msg}`)
+
+// Wayland: always-on-top, window placement and reading the window in front only work through XWayland. Must be set before ready.
+const ozone = linuxOzonePlatform({ platform: process.platform, env: process.env, argv: process.argv })
+if (ozone.force) app.commandLine.appendSwitch('ozone-platform', ozone.force)
+if (process.platform === 'linux') log(`display: ${ozone.force ?? 'default'} (${ozone.reason})`)
 const userFile = (name: string) => join(app.getPath('userData'), name)
 
 function readJson<T>(file: string): T | null {
@@ -119,6 +124,24 @@ function syncTracking() {
   }
 }
 
+/**
+ * Shows a notification that opens the main window when clicked. It stays referenced until it is done with, or it can be
+ * garbage collected while still on screen and the click would do nothing.
+ */
+const liveNotifications = new Set<Notification>()
+function notify(options: Electron.NotificationConstructorOptions) {
+  const n = new Notification(options)
+  liveNotifications.add(n)
+  const forget = () => liveNotifications.delete(n)
+  n.on('click', () => {
+    forget()
+    showWindow()
+  })
+  n.on('close', forget)
+  n.on('failed', forget)
+  n.show()
+}
+
 // ---- focus guard ----------------------------------------------------------------------------------------
 const focus = createFocusGuard({
   getWindow: readWindow,
@@ -128,13 +151,11 @@ const focus = createFocusGuard({
   nudge: ({ match, label, seconds }) => {
     log(`focus guard: nudge (${match}, ${seconds}s)`)
     if (!Notification.isSupported()) return
-    const n = new Notification({
+    notify({
       title: `Back to ${label || 'your focus'}?`,
       body: `${match} has been in front for ${seconds < 120 ? `${seconds} seconds` : `${Math.round(seconds / 60)} minutes`} during your focus time.`,
       icon: nativeImage.createFromPath(asset('icon.png')),
     })
-    n.on('click', showWindow)
-    n.show()
   },
 })
 
@@ -176,6 +197,7 @@ function syncFocus() {
 let win: BrowserWindow | null = null
 let quitting = false
 let lastUpdate: UpdateStatus = { state: 'idle' }
+let mainCrashes: number[] = [] // when the main window's page last crashed, for the reload back-off
 const boundsFile = userFile('window.json')
 const asset = (name: string) => join(__dirname, name)
 
@@ -191,7 +213,8 @@ function createWindow() {
     // Windows needs a real .ico for the taskbar and title bar; Linux uses the PNG.
     icon: nativeImage.createFromPath(asset(process.platform === 'win32' ? 'icon.ico' : 'icon.png')),
     autoHideMenuBar: true,
-    webPreferences: { preload: asset('preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
+    // The Pomodoro and reminder ticks run in this page: they must keep time while the window is hidden in the tray.
+    webPreferences: { preload: asset('preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false, backgroundThrottling: false },
   })
   // With our own app ID, Windows takes the taskbar icon from the app details, not the window: set it explicitly so the
   // timedesk logo shows (not the Electron atom) in development and in the installed app.
@@ -211,15 +234,23 @@ function createWindow() {
   win.on('minimize', syncWidget)
   win.on('restore', syncWidget)
 
+  // Moving and resizing fire many times a second: write once things settle, and on close.
+  let saveBoundsSoon: ReturnType<typeof setTimeout> | undefined
   const saveBounds = () => {
+    clearTimeout(saveBoundsSoon)
     if (!win || win.isDestroyed() || win.isMinimized()) return
     const maximized = win.isMaximized()
     writeJson(boundsFile, { ...(maximized ? (readJson<Bounds>(boundsFile) ?? win.getBounds()) : win.getBounds()), maximized })
   }
-  win.on('resize', saveBounds)
-  win.on('move', saveBounds)
+  const saveBoundsLater = () => {
+    clearTimeout(saveBoundsSoon)
+    saveBoundsSoon = setTimeout(saveBounds, 400)
+  }
+  win.on('resize', saveBoundsLater)
+  win.on('move', saveBoundsLater)
 
   win.on('close', (e) => {
+    saveBounds()
     if (!quitting && settings.closeToTray) {
       e.preventDefault()
       win?.hide()
@@ -255,6 +286,18 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     if (lastUpdate.state !== 'idle') win?.webContents.send(IPC.updateEvent, lastUpdate)
   })
+  // A crashed page would leave a blank window: load it again, waiting longer if it keeps crashing.
+  win.webContents.on('render-process-gone', (_e, details) => {
+    const t = Date.now()
+    mainCrashes = mainCrashes.filter((c) => t - c < 5 * 60_000).concat(t)
+    const delay = crashReloadDelay(mainCrashes.length)
+    log(`the window's page stopped (${details.reason}, exit ${details.exitCode}); reloading in ${delay} ms`)
+    setTimeout(() => {
+      if (win && !win.isDestroyed()) void win.loadURL(config.startUrl)
+    }, delay)
+  })
+  win.on('unresponsive', () => log('the window is not responding'))
+  win.on('responsive', () => log('the window is responding again'))
 
   void win.loadURL(config.startUrl)
 }
@@ -310,6 +353,18 @@ function smallWindow(path: string, size: { width: number; height: number }): Bro
     if (isSafeExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
+  // A small window whose page failed to load or crashed is thrown away; it is made again the next time it is needed.
+  const discard = (why: string) => {
+    log(`${path} window ${why}; it will be recreated`)
+    setImmediate(() => {
+      if (!w.isDestroyed()) w.destroy()
+    })
+  }
+  w.webContents.on('did-fail-load', (_e, code, desc, _url, isMainFrame) => {
+    if (isMainFrame && code !== -3) discard(`could not load (${desc})`)
+  })
+  w.webContents.on('render-process-gone', (_e, details) => discard(`page stopped (${details.reason})`))
+  w.on('unresponsive', () => log(`${path} window is not responding`))
   void w.loadURL(pageUrl(path))
   return w
 }
@@ -391,6 +446,7 @@ function syncWidget() {
 }
 
 const QUICK_SIZE = { width: 560, height: 92 }
+let quickAddWaiting = false // shown before its page finished loading: tell the page once it has
 function showQuickAdd() {
   if (!signedIn) {
     showWindow() // nobody to add a task for: ask them to sign in
@@ -402,16 +458,21 @@ function showQuickAdd() {
     quickWin.on('closed', () => {
       quickWin = null
     })
+    const w = quickWin
+    quickAddWaiting = false
+    w.webContents.on('did-finish-load', () => {
+      if (!quickAddWaiting || w.isDestroyed()) return
+      quickAddWaiting = false
+      w.webContents.send(IPC.quickAddShown)
+    })
   }
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
   quickWin.setBounds({ x: Math.round(area.x + (area.width - QUICK_SIZE.width) / 2), y: Math.round(area.y + area.height * 0.28), ...QUICK_SIZE })
   quickWin.show()
   pinOnTop(quickWin, true)
   quickWin.focus()
-  const w = quickWin
-  const announce = () => w.webContents.send(IPC.quickAddShown)
-  if (w.webContents.isLoading()) w.webContents.once('did-finish-load', announce)
-  else announce()
+  if (quickWin.webContents.isLoading()) quickAddWaiting = true
+  else quickWin.webContents.send(IPC.quickAddShown)
 }
 
 /** System-wide keys. Linux desktops that block global shortcuts (some Wayland setups) simply do not get them. */
@@ -430,7 +491,17 @@ function applyShortcuts() {
 }
 
 const idle = createIdleWatcher()
+let askingAboutIdle = false // one question at a time, however many ways (idle, sleep, lock) the absence was noticed
 async function askAboutIdle(since: number) {
+  if (askingAboutIdle) return
+  askingAboutIdle = true
+  try {
+    await idleDialog(since)
+  } finally {
+    askingAboutIdle = false
+  }
+}
+async function idleDialog(since: number) {
   const away = Date.now() - since
   const at = new Date(since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const { response } = await dialog.showMessageBox({
@@ -460,6 +531,44 @@ function startTimers() {
   }, 10_000)
 }
 
+/**
+ * Sleep and the lock screen: the open app slice and the focus streak end when the computer goes away, nothing is counted
+ * while it is away, and on the way back the person is asked about the time, the same as after being idle.
+ */
+let awaySince: number | null = null
+function watchPower() {
+  const away = (why: string) => {
+    if (awaySince === null) awaySince = Date.now()
+    tracker.pause()
+    focus.pause()
+    log(`${why}: tracking paused`)
+  }
+  const back = (why: string) => {
+    tracker.resume()
+    focus.resume()
+    const since = awaySince
+    awaySince = null
+    if (since === null) return
+    log(`${why}: away for ${Math.round((Date.now() - since) / 1000)}s`)
+    const ask = idle.resumed(since, Date.now(), timer.running && signedIn, settings.idleMinutes)
+    if (ask) void askAboutIdle(ask.idleSince)
+  }
+  powerMonitor.on('suspend', () => away('suspend'))
+  powerMonitor.on('lock-screen', () => away('lock'))
+  powerMonitor.on('resume', () => back('resume'))
+  powerMonitor.on('unlock-screen', () => back('unlock'))
+}
+
+/** A monitor plugged in, unplugged or rescaled: put the floating timer back where it belongs. */
+function watchDisplays() {
+  const replace = () => {
+    if (widgetWin && !widgetWin.isDestroyed() && widgetWin.isVisible()) placeWidget()
+  }
+  screen.on('display-added', replace)
+  screen.on('display-removed', replace)
+  screen.on('display-metrics-changed', replace)
+}
+
 // ---- messages from the web app -------------------------------------------------------------------------
 const isStr = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max
 const minutes = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 1 && v <= 240
@@ -471,18 +580,34 @@ function pomodoroLengths(v: unknown): TimerState['pomodoro'] {
 function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<typeof setupUpdater>) {
   // The login token is handed out only to our own pages, never to anything else that might load in the window.
   const fromOurPage = (e: { senderFrame: { url: string } | null }) => !!e.senderFrame && isInternalUrl(e.senderFrame.url, config.startUrl)
+  // The timer, the sign-in state and the recorded activity are driven only by the main window, never by a small window.
+  const fromMain = (e: { senderFrame: { url: string } | null; sender: Electron.WebContents }) => fromOurPage(e) && !!win && !win.isDestroyed() && e.sender === win.webContents
   const tokenFile = userFile('auth-token.bin')
   let sessionToken: string | null = null // used when the system cannot encrypt (some Linux setups): lasts until the app quits
 
-  ipcMain.handle(IPC.tokenGet, (e) => {
+  // On Linux the keyring can come up a little after the app (at login, with auto start), so a saved token that cannot be
+  // read yet is tried again for a few seconds. The file is never removed because reading it failed. Windows reads once.
+  const tokenTries = process.platform === 'linux' ? 5 : 1
+  let keyringWaited = false // wait only once per run; later reads try once
+  ipcMain.handle(IPC.tokenGet, async (e) => {
     if (!fromOurPage(e)) return null
     if (sessionToken) return sessionToken
-    try {
-      if (!safeStorage.isEncryptionAvailable() || !existsSync(tokenFile)) return null
-      return safeStorage.decryptString(readFileSync(tokenFile))
-    } catch {
-      return null
+    if (!existsSync(tokenFile)) return null
+    const tries = keyringWaited ? 1 : tokenTries
+    for (let i = 0; i < tries; i++) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 1000))
+      try {
+        if (safeStorage.isEncryptionAvailable()) {
+          keyringWaited = false
+          return safeStorage.decryptString(readFileSync(tokenFile))
+        }
+      } catch (err) {
+        if (i === tries - 1) log(`could not read the saved login: ${(err as Error).message}`)
+      }
+      if (sessionToken) return sessionToken // signed in meanwhile
     }
+    keyringWaited = true
+    return null
   })
   ipcMain.handle(IPC.tokenSet, (e, token: unknown) => {
     if (!fromOurPage(e) || !isStr(token, 4000) || token.length < 8) return
@@ -510,13 +635,11 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
 
   ipcMain.handle(IPC.notify, (_e, p: { title?: unknown; body?: unknown }) => {
     if (!isStr(p?.title, 120) || !isStr(p?.body, 400) || !Notification.isSupported()) return
-    const n = new Notification({ title: p.title, body: p.body, icon: nativeImage.createFromPath(asset('icon.png')) })
-    n.on('click', showWindow)
-    n.show()
+    notify({ title: p.title, body: p.body, icon: nativeImage.createFromPath(asset('icon.png')) })
   })
 
-  ipcMain.on(IPC.timer, (_e, s: Partial<TimerState>) => {
-    if (typeof s?.running !== 'boolean') return
+  ipcMain.on(IPC.timer, (e, s: Partial<TimerState>) => {
+    if (!fromMain(e) || typeof s?.running !== 'boolean') return
     const wasRunning = timer.running
     timer = {
       running: s.running,
@@ -531,8 +654,9 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
     syncFocus()
   })
 
-  ipcMain.handle(IPC.getSettings, () => settings)
-  ipcMain.handle(IPC.setSettings, (_e, patch: unknown) => {
+  ipcMain.handle(IPC.getSettings, (e) => (fromOurPage(e) ? settings : null))
+  ipcMain.handle(IPC.setSettings, (e, patch: unknown) => {
+    if (!fromOurPage(e)) return settings
     const before = settings
     settings = sanitizeDesktopSettings(settings, patch)
     writeJson(userFile('settings.json'), settings)
@@ -546,7 +670,8 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
     return settings
   })
 
-  ipcMain.on(IPC.signedIn, (_e, v: unknown) => {
+  ipcMain.on(IPC.signedIn, (e, v: unknown) => {
+    if (!fromMain(e)) return
     signedIn = v === true
     syncTracking()
     if (!signedIn) {
@@ -564,13 +689,14 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
 
   ipcMain.handle(IPC.focusState, () => focus.state())
   ipcMain.handle(IPC.focusPull, (e) => {
-    if (!fromOurPage(e)) return []
+    if (!fromMain(e)) return []
     const sessions = focus.drain()
     sendFocusState()
     return sessions
   })
   ipcMain.on(IPC.focusRequeue, (e, sessions: FocusSession[]) => {
-    if (!fromOurPage(e) || !Array.isArray(sessions)) return
+    // After sign-out these belong to the person who left: they are dropped, not kept for whoever signs in next.
+    if (!fromMain(e) || !signedIn || !Array.isArray(sessions)) return
     focus.requeue(sessions.filter((s) => isStr(s?.id, 64) && isStr(s?.startedAt, 40) && typeof s.focusedSeconds === 'number'))
   })
 
@@ -593,16 +719,25 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
     if (!fromOurPage(e)) return
     for (const w of [win, widgetWin, quickWin]) if (w && !w.isDestroyed() && w.webContents !== e.sender) w.webContents.send(IPC.dataChangedEvent)
   })
-  ipcMain.handle(IPC.pull, () => tracker.drain())
-  ipcMain.on(IPC.requeue, (_e, samples: ActivitySample[]) => {
-    if (Array.isArray(samples)) tracker.requeue(samples.filter((s) => isStr(s?.id, 64) && isStr(s?.app, 120) && typeof s.seconds === 'number'))
+  ipcMain.handle(IPC.pull, (e) => (fromMain(e) ? tracker.drain() : []))
+  ipcMain.on(IPC.requeue, (e, samples: ActivitySample[]) => {
+    if (fromMain(e) && signedIn && Array.isArray(samples)) tracker.requeue(samples.filter((s) => isStr(s?.id, 64) && isStr(s?.app, 120) && typeof s.seconds === 'number'))
   })
 
   ipcMain.handle(IPC.updateStatus, () => lastUpdate)
-  ipcMain.handle(IPC.checkUpdates, () => updater.check())
-  ipcMain.on(IPC.installUpdate, () => {
+  ipcMain.handle(IPC.checkUpdates, async (e) => {
+    if (fromOurPage(e)) await updater.check()
+  })
+  ipcMain.on(IPC.installUpdate, (e) => {
+    if (!fromOurPage(e) || lastUpdate.state !== 'ready') return
     quitting = true
     updater.install()
+    // Still running a few seconds later: the install did not happen, so closing the window must hide it to the tray again.
+    setTimeout(() => {
+      if (!quitting) return
+      quitting = false
+      log('the update did not restart the app')
+    }, 5000)
   })
   ipcMain.on(IPC.retry, () => void win?.loadURL(config.startUrl))
 }
@@ -640,8 +775,10 @@ if (!app.requestSingleInstanceLock()) {
       packaged: app.isPackaged,
       log,
       send: (s) => {
-        lastUpdate = s
-        win?.webContents.send(IPC.updateEvent, s)
+        const next = mergeUpdateStatus(lastUpdate, s)
+        if (next === lastUpdate) return log(`update: kept "${lastUpdate.state}" over "${s.state}"`)
+        lastUpdate = next
+        if (win && !win.isDestroyed()) win.webContents.send(IPC.updateEvent, next)
       },
     })
     registerIpc(tray, updater)
@@ -649,6 +786,8 @@ if (!app.requestSingleInstanceLock()) {
     createWindow()
     applyShortcuts()
     startTimers()
+    watchPower()
+    watchDisplays()
     log(`started ${app.getVersion()} (${app.isPackaged ? 'packaged' : 'development'}) (${config.mode}) -> ${config.startUrl}`)
   })
 

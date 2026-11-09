@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import { schema, type Db } from '@timedesk/db'
 import type { MemoryProvider } from '../lib/memory.ts'
@@ -17,6 +17,12 @@ interface Parts {
 
 /** Bumped when the shape of the export changes, so a reader can tell versions apart. */
 export const EXPORT_FORMAT = 1
+
+/**
+ * The export is one response, and a hosted function may answer with only a few megabytes. Months of desktop activity
+ * can be far more than that, so only the most recent samples are included in full; totals per app cover all of it.
+ */
+export const EXPORT_ACTIVITY_LIMIT = 20_000
 
 /** Your data, all of it: download a copy, or delete the account and everything in it. */
 export function createAccountService(p: Parts) {
@@ -41,11 +47,27 @@ export function createAccountService(p: Parts) {
         db.select().from(schema.weeklyReviews).where(eq(schema.weeklyReviews.userId, userId)).orderBy(asc(schema.weeklyReviews.weekStart)),
         db.select().from(schema.userSettings).where(eq(schema.userSettings.userId, userId)),
         db.select().from(schema.chats).where(live(schema.chats, userId)).orderBy(asc(schema.chats.createdAt)),
-        db.select().from(schema.activitySamples).where(eq(schema.activitySamples.userId, userId)).orderBy(asc(schema.activitySamples.startedAt)),
+        // One more than the limit, to know whether anything was left out.
+        db
+          .select()
+          .from(schema.activitySamples)
+          .where(eq(schema.activitySamples.userId, userId))
+          .orderBy(desc(schema.activitySamples.startedAt))
+          .limit(EXPORT_ACTIVITY_LIMIT + 1),
         p.aiKeys.list(userId),
         db.select().from(schema.googleConnections).where(eq(schema.googleConnections.userId, userId)),
         db.select().from(schema.focusSessions).where(eq(schema.focusSessions.userId, userId)).orderBy(asc(schema.focusSessions.startedAt)),
       ])
+
+      const activityCapped = activity.length > EXPORT_ACTIVITY_LIMIT
+      const recentActivity = activity.slice(0, EXPORT_ACTIVITY_LIMIT).reverse() // oldest first, as before
+      const a = schema.activitySamples
+      const activityTotals = await db
+        .select({ app: a.app, seconds: sql<number>`cast(sum(${a.seconds}) as integer)`, samples: sql<number>`cast(count(*) as integer)`, firstAt: sql<Date>`min(${a.startedAt})`, lastAt: sql<Date>`max(${a.startedAt})` })
+        .from(a)
+        .where(eq(a.userId, userId))
+        .groupBy(a.app)
+        .orderBy(desc(sql`sum(${a.seconds})`))
 
       const chatIds = chats.map((c) => c.id)
       const messages = chatIds.length
@@ -80,8 +102,13 @@ export function createAccountService(p: Parts) {
           messages: messages.filter((m) => m.chatId === c.id).map(({ chatId: _c, ...m }) => m),
         })),
         assistantMemories: memories,
-        /** What the desktop app saw in the foreground. */
-        activity: activity.map(({ userId: _u, ...a }) => a),
+        /** What the desktop app saw in the foreground: the most recent samples (all of them unless there are very many). */
+        activity: recentActivity.map(({ userId: _u, ...row }) => row),
+        /** Time per app over all the activity ever recorded, including any samples left out above. */
+        activityByApp: activityTotals.map((t) => ({ ...t, firstAt: new Date(t.firstAt).toISOString(), lastAt: new Date(t.lastAt).toISOString() })),
+        ...(activityCapped
+          ? { activityNote: `Only the latest ${EXPORT_ACTIVITY_LIMIT.toLocaleString('en')} activity samples are included in full; activityByApp totals cover everything.` }
+          : {}),
         /** Focus guard sessions: focused and distracted time, and which listed apps or sites took it. */
         focusSessions: focus.map(({ userId: _u, ...s }) => s),
         aiKeysSaved: keys.map((k) => k.provider),

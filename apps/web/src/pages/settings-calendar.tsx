@@ -25,7 +25,7 @@ const summary = (r: GoogleSyncResult) => {
 
 /** Connect Google Calendar, choose what is shared, and sync. The browser never holds a Google token. */
 export function CalendarTab() {
-  const { status, loading, refresh } = useGoogleStatus()
+  const { status, loading, error: statusError, refresh } = useGoogleStatus()
   const [params, setParams] = useSearchParams()
   const [busy, setBusy] = useState<'connect' | 'disconnect' | 'sync' | 'push' | ''>('')
   const [info, setInfo] = useState('')
@@ -97,7 +97,17 @@ export function CalendarTab() {
   }
 
   if (loading) return <p className="text-muted-foreground text-sm">Loading...</p>
-  if (!status) return null
+  if (!status) {
+    // Only reached when the check failed and there is no earlier answer to fall back on.
+    return (
+      <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="text-destructive">{statusError ? 'Could not check Google Calendar.' : 'Google Calendar is not available.'}</span>
+        <Button size="sm" variant="outline" onClick={() => void refresh()}>
+          Retry
+        </Button>
+      </div>
+    )
+  }
 
   if (!status.configured) {
     return (

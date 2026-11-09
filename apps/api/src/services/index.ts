@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import type { Deps } from '../types.ts'
 import { createAccountService } from './account.service.ts'
 import { createActivityService } from './activity.service.ts'
@@ -47,7 +48,10 @@ export function createServices({ db, env, models, memory, google, auth }: Deps) 
     projects,
     tasks,
     time,
-    assistant: createAssistantService({ aiKeys, projects, tasks, time, models, memory, calendar, reviews, settings, activity, focus }),
+    assistant: createAssistantService({ aiKeys, projects, tasks, time, models, memory, calendar, reviews, settings, activity, focus,
+      // A key of its own (derived, so the encryption secret itself is never used for anything else).
+      approvalSecret: createHmac('sha256', env.KEY_ENCRYPTION_SECRET).update('tempo-tool-approval').digest('hex'),
+    }),
   }
 }
 

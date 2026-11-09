@@ -2,8 +2,8 @@ import { eq } from 'drizzle-orm'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { schema } from '@timedesk/db'
 import { createFakeGoogle, type FakeGoogle } from '../src/lib/google-fake.ts'
-import { GoogleApiError, type GoogleClient } from '../src/lib/google.ts'
-import { api, approvedMember, createTestApp, scriptedModel, textStep, toolStep, WEB_ORIGIN, type TestApp } from './helpers.ts'
+import { GoogleApiError, GoogleUnreachableError, type GoogleClient } from '../src/lib/google.ts'
+import { api, approvedMember, chatAllowingAll, createTestApp, scriptedModel, textStep, toolStep, WEB_ORIGIN, type TestApp } from './helpers.ts'
 
 const REDIRECT = 'http://localhost:3001/v1/integrations/google/callback'
 type Api = ReturnType<typeof api>
@@ -13,13 +13,22 @@ async function appWith(g?: { client: GoogleClient }, extra: Parameters<typeof cr
   return createTestApp({ ...extra, google: g ? { client: g.client, redirectUri: REDIRECT } : undefined })
 }
 
-/** Starts the connect flow, then plays Google's part: the browser returns to the callback with a sign-in code. */
-async function connect(t: TestApp, a: Api, name: string, opts: { desktop?: boolean } = {}) {
+/** The callback address (without /v1) Google would send the browser back to, with a sign-in code for `name`'s Google account. */
+async function startConnect(a: Api, name: string, opts: { desktop?: boolean } = {}) {
   const res = await a.post('/integrations/google/connect', { desktop: opts.desktop ?? false })
   expect(res.status).toBe(200)
   const url = new URL((await res.json()).url)
   url.searchParams.set('code', `code-${name}`)
-  return t.app.request(url.pathname + url.search)
+  return url.pathname.replace(/^\/v1/, '') + url.search
+}
+
+/**
+ * Starts the connect flow, then plays Google's part: the browser returns to the callback with a sign-in code, carrying
+ * the person's login cookie as a real browser does. The desktop flow comes back in the system browser, with no login.
+ */
+async function connect(t: TestApp, a: Api, name: string, opts: { desktop?: boolean } = {}) {
+  const back = await startConnect(a, name, opts)
+  return opts.desktop ? t.app.request('/v1' + back) : a.get(back)
 }
 
 const ISO = (y: number, m: number, d: number, h: number) => new Date(y, m - 1, d, h).toISOString()
@@ -448,11 +457,21 @@ describe('Google Calendar: Tempo', () => {
       true,
     )
     fake.seed('ann@gmail.test', { summary: 'Existing', start: { date: '2026-11-17' }, end: { date: '2026-11-18' } })
-    const body = await (await ann.post('/assistant/chat', chat('book the dentist'))).text()
+    const body = await chatAllowingAll(ann, chat('book the dentist'))
     expect(body).toContain('Done.')
     const dentist = fake.eventsOf('ann@gmail.test').find((e) => e.summary === 'Dentist')!
     expect(dentist.start).toEqual({ dateTime: '2026-11-18T15:00:00', date: null, timeZone: 'Europe/London' })
     expect(body).toContain('Existing') // the listing result reached the model
+  }, 30_000)
+
+  it("lists the person's own days, in their time zone, not the server's", async () => {
+    const { fake, ann } = await setup([toolStep('list_calendar_events', { from: '2026-11-16', to: '2026-11-16' }), textStep('Done.')], true)
+    // 01:00 on 16 Nov in Kiritimati (UTC+14) is still 15 Nov in UTC and in any server zone
+    fake.seed('ann@gmail.test', { summary: 'Early call', start: { dateTime: '2026-11-15T11:00:00Z' }, end: { dateTime: '2026-11-15T11:30:00Z' } })
+    fake.seed('ann@gmail.test', { summary: 'Day before', start: { dateTime: '2026-11-15T08:00:00Z' }, end: { dateTime: '2026-11-15T08:30:00Z' } })
+    const body = await (await ann.post('/assistant/chat', { ...chat('what is on the 16th'), timeZone: 'Pacific/Kiritimati' })).text()
+    expect(body).toContain('Early call')
+    expect(body).not.toContain('Day before') // 22:00 on 15 Nov there
   }, 30_000)
 
   it('asks for a time zone instead of guessing, and can all-day, change and delete', async () => {
@@ -464,7 +483,7 @@ describe('Google Calendar: Tempo', () => {
       ],
       true,
     )
-    const body = await (await ann.post('/assistant/chat', chat('x'))).text()
+    const body = await chatAllowingAll(ann, chat('x'))
     expect(body).toContain('needs a time zone')
     const holiday = fake.eventsOf('ann@gmail.test').find((e) => e.summary === 'Holiday')!
     expect(holiday).toMatchObject({ start: { date: '2026-11-23' }, end: { date: '2026-11-26' } }) // the last day is included
@@ -482,7 +501,7 @@ describe('Google Calendar: Tempo', () => {
       ]
     }, true)
     // the first tool call renames and moves it, the second removes it
-    const body = await (await ann.post('/assistant/chat', chat('move my holiday, then cancel it'))).text()
+    const body = await chatAllowingAll(ann, chat('move my holiday, then cancel it'))
     expect(body).toContain('ok')
     expect(fake.eventsOf('ann@gmail.test').some((e) => e.id === id)).toBe(false)
     expect(fake.log).toEqual(expect.arrayContaining(['patch', 'delete']))
@@ -490,7 +509,7 @@ describe('Google Calendar: Tempo', () => {
 
   it('reports a Google problem to the model instead of crashing the chat', async () => {
     const { ann } = await setup([toolStep('update_calendar_event', { event: 'does-not-exist', title: 'X' }), textStep('Could not find it.')], true)
-    const body = await (await ann.post('/assistant/chat', chat('rename it'))).text()
+    const body = await chatAllowingAll(ann, chat('rename it'))
     expect(body).toContain('Could not find it.')
   }, 30_000)
 
@@ -506,4 +525,136 @@ describe('Google Calendar: Tempo', () => {
     await (await ann.post('/assistant/chat', chat('hello'))).text()
     expect(JSON.stringify(prompts[0])).toContain('Google Calendar is connected')
   }, 30_000)
+})
+
+describe('Google Calendar: connecting safely', () => {
+  let t: TestApp
+  let ann: Api
+  let mallory: Api
+  beforeAll(async () => {
+    t = await appWith(createFakeGoogle())
+    ann = api(t, (await approvedMember(t, 'ann')).cookie)
+    mallory = api(t, (await approvedMember(t, 'mallory')).cookie)
+  }, 60_000)
+
+  const connected = async (a: Api) => (await (await a.get('/integrations/google')).json()).connected
+
+  it("someone else's connect link cannot attach your Google account to their timedesk account", async () => {
+    // mallory starts the flow and sends the link to ann, who is signed in to timedesk in her browser
+    const back = await startConnect(mallory, 'ann')
+    const res = await ann.get(back)
+    expect(res.headers.get('location')).toContain('google=error')
+    expect(await connected(mallory)).toBe(false)
+    expect(await connected(ann)).toBe(false)
+  })
+
+  it('the browser flow needs the login of the person who started it', async () => {
+    const back = await startConnect(ann, 'ann')
+    expect((await t.app.request('/v1' + back)).headers.get('location')).toContain('google=error')
+    expect(await connected(ann)).toBe(false)
+  })
+
+  it('a state works only once', async () => {
+    const back = await startConnect(ann, 'ann')
+    expect((await ann.get(back)).headers.get('location')).toContain('google=connected')
+    await ann.del('/integrations/google')
+    expect((await ann.get(back)).headers.get('location')).toContain('google=error')
+    expect(await connected(ann)).toBe(false)
+  })
+
+  it('the desktop flow works without a login in the browser, but not with somebody else signed in there', async () => {
+    const theirs = await startConnect(mallory, 'ann', { desktop: true })
+    expect((await ann.get(theirs)).status).toBe(400)
+    expect(await connected(mallory)).toBe(false)
+
+    expect((await connect(t, mallory, 'mallory', { desktop: true })).status).toBe(200)
+    expect(await connected(mallory)).toBe(true)
+  })
+})
+
+describe('Google Calendar: when Google misbehaves', () => {
+  const range = '?from=2026-11-01T00:00:00Z&to=2026-12-01T00:00:00Z'
+  const failing = async (error: Error) => {
+    const fake = createFakeGoogle()
+    const t = await appWith({ client: { ...fake.client, listEvents: async () => { throw error } } })
+    const a = api(t, (await approvedMember(t, 'gil')).cookie)
+    await connect(t, a, 'gil')
+    return a.get('/calendar/events' + range)
+  }
+
+  it.each([
+    [new GoogleApiError(400, 'bad'), 422],
+    [new GoogleApiError(403, 'quota'), 503],
+    [new GoogleApiError(429, 'slow down'), 503],
+    [new GoogleApiError(500, 'boom'), 502],
+    [new GoogleUnreachableError(false), 502],
+    [new GoogleUnreachableError(true), 504],
+  ])('%s becomes a clear %i', async (error, status) => {
+    const res = await failing(error)
+    expect(res.status).toBe(status)
+    expect((await res.json()).error).toMatch(/Google Calendar/)
+  }, 60_000)
+
+  it('refuses an unknown time zone for an event', async () => {
+    const fake = createFakeGoogle()
+    const t = await appWith(fake)
+    const a = api(t, (await approvedMember(t, 'hal')).cookie)
+    await connect(t, a, 'hal')
+    expect((await a.post('/calendar/events', { title: 'Call', start: '2026-11-20T10:00:00', timeZone: 'Mars/Olympus' })).status).toBe(422)
+    expect((await a.post('/calendar/events', { title: 'Call', start: '2026-11-20T10:00:00', timeZone: 'Europe/London' })).status).toBe(201)
+  }, 60_000)
+
+  it('one task Google refuses does not stop the others, and a big backlog goes a batch at a time', async () => {
+    const fake = createFakeGoogle()
+    const picky: GoogleClient = {
+      ...fake.client,
+      insertEvent: async (token, cal, input) => {
+        if (input.summary === 'Refused') throw new GoogleApiError(400, 'no')
+        return fake.client.insertEvent(token, cal, input)
+      },
+    }
+    const t = await appWith({ client: picky })
+    const a = api(t, (await approvedMember(t, 'ida')).cookie)
+    await connect(t, a, 'ida')
+    await a.patch('/integrations/google', { pushTasks: false })
+    await a.post('/tasks', { title: 'Refused', due: '2026-11-01' })
+    for (let i = 0; i < 30; i++) await a.post('/tasks', { title: `Task ${i}`, due: '2026-11-02' })
+    await a.patch('/integrations/google', { pushTasks: true }) // mirrors the first batch
+
+    const first = await (await a.post('/calendar/sync')).json()
+    expect(first.remaining).toBeGreaterThanOrEqual(1) // the refused one stays waiting
+    const mirrored = fake.eventsOf('ida@gmail.test').filter((e) => e.summary?.startsWith('Task '))
+    expect(mirrored).toHaveLength(30)
+  }, 120_000)
+
+  it('a sync cut off by Google does not skip the changes it did not read', async () => {
+    const fake = createFakeGoogle()
+    const cutOff: GoogleClient = {
+      ...fake.client,
+      listEvents: async (token, cal, q) => {
+        const list = await fake.client.listEvents(token, cal, q)
+        return q.updatedMin ? Object.assign([...list], { more: true }) : list
+      },
+    }
+    const t = await appWith({ client: cutOff })
+    const a = api(t, (await approvedMember(t, 'jan')).cookie)
+    await connect(t, a, 'jan')
+    await a.post('/tasks', { title: 'Mirrored', due: '2026-11-10' })
+    const before = Date.now()
+    expect((await a.post('/calendar/sync')).status).toBe(200)
+    const { lastSyncAt } = await (await a.get('/integrations/google')).json()
+    // only as far as the last change read (the task's event), not "now"
+    expect(Date.parse(lastSyncAt)).toBeLessThanOrEqual(before)
+  }, 60_000)
+
+  it('a task save does not wait long for a slow Google', async () => {
+    const fake = createFakeGoogle()
+    const slow: GoogleClient = { ...fake.client, insertEvent: () => new Promise(() => {}) } // never answers
+    const t = await appWith({ client: slow })
+    const a = api(t, (await approvedMember(t, 'kim')).cookie)
+    await connect(t, a, 'kim')
+    const started = Date.now()
+    expect((await a.post('/tasks', { title: 'Saved anyway', due: '2026-11-10' })).status).toBe(201)
+    expect(Date.now() - started).toBeLessThan(8_000)
+  }, 60_000)
 })

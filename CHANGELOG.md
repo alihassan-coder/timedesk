@@ -2,7 +2,34 @@
 
 ## Unreleased
 
-Needs the backend update and database migrations `0004_reviews_and_completed` and `0005_focus_sessions` (run `pnpm --filter @timedesk/db db:migrate` before the API goes live), and a new desktop release for Focus guard.
+Needs the backend update and database migrations `0004_reviews_and_completed`, `0005_focus_sessions` and `0006_multitask_and_custom_colors` (run `pnpm --filter @timedesk/db db:migrate` before the API goes live), and a new desktop release.
+
+### Works offline
+- Fixed: starting a timer, losing the internet and pressing Stop did not stop the timer. Every change (timer start and stop, tasks, projects) now happens on screen at once, is kept on this device, and goes to the server in order when there is a connection. Stop records the moment you pressed it, not when the internet came back
+- Changes survive a reload or a restart while offline. The top bar shows "Offline · 2 changes waiting" or "Saving..."; click it to try again
+- The app opens without a connection: the web app keeps its files on the device, and both the web and the desktop app remember who is signed in, so an offline start no longer sends you to the sign-in page
+- Several windows of the app (the desktop app's floating timer and quick add, two browser tabs) share the same list of waiting changes
+- The server accepts the same change twice without doing it twice, so a retry after a dropped connection is always safe. A device clock that is a little off is corrected instead of refused
+- Signing out first sends what is waiting (for a few seconds); anything left is kept for that person and sent when they sign in again on this device
+
+### Multitasking
+- Track two (or more) tasks at once: the timer menu in the top bar has "Also track" next to "Switch to". Each running timer is listed with its own Stop, plus Stop all
+- The time they overlap is shared between them in every total (an hour with two timers counts 30 minutes for each), so your day always adds up to the clock. Reports, timesheet, dashboard, weekly review, the floating timer and Tempo all count it this way
+- Tempo can start a timer alongside the running one, says which timers are running, and stops one by name or all of them
+
+### Project colours
+- Twelve preset colours instead of five, and any colour you like: a colour picker or a hex code such as #ff6600 (for a client's brand colour). Existing projects keep their colour
+
+### Tempo asks before it acts
+- Deleting a task, a project or a calendar event, and adding or changing calendar events, now shows an approval card in the chat: Allow or Don't allow. Nothing happens until you choose
+- When a request is unclear (two tasks with similar names), Tempo asks which one you mean with clickable choices instead of guessing
+- Failed actions are shown as failed (before, "Deleted a task" could show a tick when nothing was found); errors from the AI provider (wrong key, rate limit, model gone) say what happened, with Try again
+- A chat is saved even when you leave it while Tempo is answering. Offline, the chat says it needs a connection
+
+### Stability and speed
+- Opens at once from what this device has, instead of waiting for the server to wake up; pages load in the background so the first click is instant; the layout and dashboard no longer redraw every second while a timer runs
+- One message bar on every page for errors, with a close button (before, errors only showed on the dashboard and never went away). A page that crashes shows its error in place while the sidebar keeps working
+- Many smaller fixes found by a review of the whole app: see the commit for the full list
 
 ### Focus guard (desktop)
 - Settings, Desktop, **Focus guard**: an on/off switch (off by default), your lists of distracting apps (for example Discord, Steam) and sites (words in the browser tab title, for example YouTube, reddit.com), with one-click suggestions, and how long a distraction may last before the nudge (10 seconds to 2 minutes)

@@ -3,27 +3,28 @@ import { BrowserRouter, Route, Routes } from 'react-router'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { PublicOnly, RequireAuth } from '@/components/require-auth'
 import Layout from '@/layout'
+import { pages } from '@/lib/pages'
 import LoginPage from '@/pages/auth/login'
 import RegisterPage from '@/pages/auth/register'
 
 // Each page is its own file, loaded the first time it is opened. The first screen then only downloads what it
 // needs: charts, the Tempo chat (AI SDK and markdown) and the calendar come later, when someone goes there.
-const ActivityPage = lazy(() => import('@/pages/activity'))
-const AdminPage = lazy(() => import('@/pages/admin'))
-const AppsPage = lazy(() => import('@/pages/apps'))
-const AssistantPage = lazy(() => import('@/pages/assistant'))
-const CalendarPage = lazy(() => import('@/pages/calendar'))
-const Dashboard = lazy(() => import('@/pages/dashboard'))
-const DownloadPage = lazy(() => import('@/pages/download'))
-const NotFoundPage = lazy(() => import('@/pages/not-found'))
-const QuickAddPage = lazy(() => import('@/pages/quick-add'))
-const ProjectsPage = lazy(() => import('@/pages/projects'))
-const ReportsPage = lazy(() => import('@/pages/reports'))
-const ReviewPage = lazy(() => import('@/pages/review'))
-const SettingsPage = lazy(() => import('@/pages/settings'))
-const TasksPage = lazy(() => import('@/pages/tasks'))
-const TimesheetPage = lazy(() => import('@/pages/timesheet'))
-const WidgetPage = lazy(() => import('@/pages/widget'))
+const ActivityPage = lazy(pages.activity)
+const AdminPage = lazy(pages.admin)
+const AppsPage = lazy(pages.apps)
+const AssistantPage = lazy(pages.assistant)
+const CalendarPage = lazy(pages.calendar)
+const Dashboard = lazy(pages.dashboard)
+const DownloadPage = lazy(pages.download)
+const NotFoundPage = lazy(pages.notFound)
+const QuickAddPage = lazy(pages.quickAdd)
+const ProjectsPage = lazy(pages.projects)
+const ReportsPage = lazy(pages.reports)
+const ReviewPage = lazy(pages.review)
+const SettingsPage = lazy(pages.settings)
+const TasksPage = lazy(pages.tasks)
+const TimesheetPage = lazy(pages.timesheet)
+const WidgetPage = lazy(pages.widget)
 
 export default function App() {
   return (

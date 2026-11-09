@@ -1,8 +1,8 @@
 import { timeEntriesCsv, toDateKey } from '@timedesk/shared'
-import { getState, resetStore } from '@/data/store'
+import { discardPending, getState, resetStore, syncNow } from '@/data/store'
 import { resetChats } from '@/features/assistant/chat-store'
 import { api, ApiError } from '@/lib/api'
-import { API_URL, authHeaders, signOut } from '@/lib/auth-client'
+import { API_URL, authHeaders, forgetProfile, signOut } from '@/lib/auth-client'
 import { resetAi } from '@/lib/ai/server'
 import { clearAllCaches } from '@/lib/cache'
 import { stopSettingsSync } from '@/lib/settings-sync'
@@ -39,6 +39,7 @@ export function exportTimeCsv() {
 
 /** Forgets everything about the signed-in person on this device: data, chats, AI choices, caches. */
 export function clearLocalSession() {
+  forgetProfile()
   resetStore()
   resetAi()
   resetChats()
@@ -48,8 +49,16 @@ export function clearLocalSession() {
 
 /** Signs out and clears this device. */
 export async function signOutHere() {
-  await signOut()
-  clearLocalSession()
+  // Send changes that are still waiting first (a few seconds at most). Anything left stays saved on this device and
+  // goes out the next time this person signs in here.
+  await Promise.race([syncNow(), new Promise((r) => setTimeout(r, 4000))])
+  try {
+    await signOut()
+  } catch {
+    // offline: this device still signs out
+  } finally {
+    clearLocalSession()
+  }
 }
 
 /**
@@ -66,6 +75,7 @@ export const getLoginNotice = () => loginNotice
 export async function deleteAccount(password: string) {
   await api('/account', { method: 'DELETE', body: { password } })
   setLoginNotice('Your account and all its data were deleted.')
+  discardPending()
   // The session is already gone on the server, so signing out there may fail. Clearing this device must not.
   try {
     await signOut()
