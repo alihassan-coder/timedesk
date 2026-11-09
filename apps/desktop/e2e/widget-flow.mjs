@@ -20,6 +20,13 @@ const SHOTS = process.argv[2]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
 
+/** The main timedesk window on the virtual screen: the widest window whose title mentions timedesk. */
+function mainWindowRow() {
+  const rows = execFileSync('wmctrl', ['-lG']).toString().split('\n').filter(Boolean).map((l) => l.trim().split(/\s+/))
+  // wmctrl -lG columns: id, desktop, x, y, width, height, host, title...
+  return rows.filter((p) => /timedesk/i.test(p.slice(7).join(' ')) && Number(p[4]) >= 600).sort((a, b) => Number(b[4]) - Number(a[4]))[0]
+}
+
 const userData = mkdtempSync(join(tmpdir(), 'td-widget-'))
 const app = spawn(electron, ['.', `--web-url=${WEB}`, `--remote-debugging-port=${PORT}`], {
   cwd: new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
@@ -86,18 +93,22 @@ try {
     await shot(main, 'w1-settings')
   })
 
+  if (process.platform === 'linux') {
+    await step('Linux: the window is named timedesk, so docks show the timedesk logo (not a generic icon)', async () => {
+      const mainRow = mainWindowRow()
+      if (!mainRow) throw new Error('could not find the main window on the virtual screen')
+      const wmClass = execFileSync('xprop', ['-id', mainRow[0], 'WM_CLASS']).toString().trim()
+      results.push('      ' + wmClass)
+      if (!/"timedesk"/i.test(wmClass)) throw new Error('the window is not named timedesk: ' + wmClass)
+    })
+  }
+
   await step('Automatic: no floating window while timedesk is in front, even with a timer running', async () => {
     if (process.platform === 'linux') {
       // A virtual screen has no person to click on a window: give the main window the focus, as a person would.
-      const rows = execFileSync('wmctrl', ['-lGp']).toString().split('\n').filter(Boolean).map((l) => l.trim().split(/\s+/))
-      const mainRow = rows.find((p) => Number(p[2]) === app.pid && Number(p[5]) >= 600)
-      if (mainRow) execFileSync('wmctrl', ['-i', '-a', mainRow[0]])
-      // The dock shows the timedesk logo only when the window's name matches timedesk.desktop (StartupWMClass=timedesk).
-      if (mainRow) {
-        const wmClass = execFileSync('xprop', ['-id', mainRow[0], 'WM_CLASS']).toString()
-        results.push('      main window ' + wmClass.trim())
-        if (!/"timedesk"/i.test(wmClass)) throw new Error('the window is not named timedesk, so docks show a generic icon: ' + wmClass.trim())
-      }
+      const mainRow = mainWindowRow()
+      if (!mainRow) throw new Error('could not find the main window on the virtual screen')
+      execFileSync('wmctrl', ['-i', '-a', mainRow[0]])
       await sleep(800)
     }
     await main.ev(`document.querySelector('[aria-label="Floating timer style"] [role=radio]').click()`)
