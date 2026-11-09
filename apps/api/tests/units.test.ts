@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { loadEnv } from '../src/config/env.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { googleRedirectUri, loadEnv } from '../src/config/env.ts'
 import { decryptSecret, encryptSecret } from '../src/utils/crypto.ts'
+import { within } from '../src/lib/memory.ts'
+import { listModels, SUGGESTED_MODELS } from '../src/lib/models.ts'
 
 const secret = 'a-long-secret-that-is-at-least-32-chars!!'
 
@@ -47,5 +49,37 @@ describe('environment validation', () => {
   it('fails loudly when a secret is missing or too short', () => {
     expect(() => loadEnv({ ...good, BETTER_AUTH_SECRET: 'short' })).toThrow(/BETTER_AUTH_SECRET/)
     expect(() => loadEnv({ ...good, DATABASE_URL: undefined })).toThrow(/DATABASE_URL/)
+  })
+
+  it('treats the empty optional Google lines from .env.example as not set', () => {
+    const env = loadEnv({ ...good, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: ' ', GOOGLE_REDIRECT_URI: '', BETTER_AUTH_URL: 'https://api.example.com' })
+    expect(env.GOOGLE_CLIENT_ID).toBeUndefined()
+    expect(env.GOOGLE_CLIENT_SECRET).toBeUndefined()
+    expect(googleRedirectUri(env)).toBe('https://api.example.com/v1/integrations/google/callback')
+  })
+})
+
+describe('waiting on slow helpers', () => {
+  it('gives up after the time limit with the fallback, and passes a quick answer through', async () => {
+    const never = new Promise<string[]>(() => {})
+    const started = Date.now()
+    expect(await within(never, 50, [])).toEqual([])
+    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(await within(Promise.resolve(['a']), 50, [])).toEqual(['a'])
+    expect(await within(Promise.reject(new Error('down')), 50, ['fallback'])).toEqual(['fallback'])
+  })
+})
+
+describe('listing models', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('falls back to the suggestions when the provider hangs or fails, and passes a time limit', async () => {
+    let signal: AbortSignal | undefined
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      signal = init.signal ?? undefined
+      throw new DOMException('The operation timed out.', 'TimeoutError')
+    })
+    expect(await listModels('openai', 'sk-x')).toEqual(SUGGESTED_MODELS.openai)
+    expect(signal).toBeInstanceOf(AbortSignal)
   })
 })

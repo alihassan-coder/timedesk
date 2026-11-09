@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
-import { addDays, daysInRange, formatHours, overlapMs, periodStart, rangeBuckets, toDateKey, type ReportPeriod, type TimeEntry } from '@timedesk/shared'
+import { addDays, daysInRange, formatHours, overlapMs, periodStart, rangeBuckets, splitParallel, toDateKey, type Project, type ReportPeriod, type TimeEntry } from '@timedesk/shared'
 import { PageHeader } from '@/components/page-header'
 import { Segmented } from '@/components/segmented'
 import { Button } from '@/components/ui/button'
@@ -18,8 +18,9 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
-import { projectColor } from '@/lib/project-colors'
+import { NO_PROJECT_COLOR, projectColor } from '@/lib/project-colors'
 import { ProjectDot } from '@/components/project-dot'
+import { cn } from '@/lib/utils'
 
 interface Bucket {
   label: string
@@ -69,6 +70,9 @@ function buckets(period: ReportPeriod, now: number): Bucket[] {
 const sum = (entries: TimeEntry[], b: { start: number; end: number }, now: number) =>
   entries.reduce((s, e) => s + overlapMs(e, b.start, b.end, now), 0)
 
+/** Chart key for time with no project, or whose project was deleted. Project ids are uuids, so it cannot clash. */
+const NONE = 'no-project'
+
 type Mode = ReportPeriod | 'custom'
 const MAX_DAYS = 1830 // about five years
 const PRESETS = [
@@ -101,23 +105,46 @@ export default function ReportsPage() {
         : rangeDays > MAX_DAYS
           ? 'Pick a range of five years or less.'
           : ''
-  const customSet = custom && !rangeError ? rangeBuckets(from, to) : null
+  const customSet = useMemo(() => (custom && !rangeError ? rangeBuckets(from, to) : null), [custom, rangeError, from, to])
+  const bs = useMemo(() => (period === 'custom' ? (customSet?.buckets ?? []) : buckets(period, now)), [customSet, period, now])
 
-  const bs = custom ? (customSet?.buckets ?? []) : buckets(period, now)
-  const data = bs.map((b) => {
-    const row: Record<string, number | string> = { label: b.label }
-    for (const p of projects) {
-      row[p.id] = Math.round((sum(entries.filter((e) => e.projectId === p.id), b, now) / 3_600_000) * 10) / 10
+  // Overlapping timers share their time, so two running at once do not count double.
+  const pieces = useMemo(() => splitParallel(entries), [entries])
+
+  const { data, totals, grand, series } = useMemo(() => {
+    const range = bs.length ? { start: bs[0].start, end: bs[bs.length - 1].end } : { start: 0, end: 0 }
+    const known = new Set(projects.map((p) => p.id))
+    // One pass: keep only time inside the range, grouped by project ("No project" for none or a deleted one).
+    const byKey = new Map<string, TimeEntry[]>()
+    for (const e of pieces) {
+      if (e.startedAt >= range.end || (e.endedAt ?? now) <= range.start) continue
+      const key = e.projectId && known.has(e.projectId) ? e.projectId : NONE
+      const list = byKey.get(key)
+      if (list) list.push(e)
+      else byKey.set(key, [e])
     }
-    return row
-  })
-  const config = Object.fromEntries(projects.map((p) => [p.id, { label: p.name, color: projectColor(p) }])) satisfies ChartConfig
+    const noneMs = sum(byKey.get(NONE) ?? [], range, now)
+    const series: { key: string; project: Project | null }[] = [
+      ...projects.map((p) => ({ key: p.id, project: p })),
+      ...(noneMs > 0 ? [{ key: NONE, project: null }] : []),
+    ]
+    const data = bs.map((b) => {
+      const row: Record<string, number | string> = { label: b.label }
+      for (const { key } of series) row[key] = Math.round((sum(byKey.get(key) ?? [], b, now) / 3_600_000) * 10) / 10
+      return row
+    })
+    const totals = series.map(({ key, project }) => ({ key, project, ms: sum(byKey.get(key) ?? [], range, now) })).sort((a, b) => b.ms - a.ms)
+    const grand = totals.reduce((s, r) => s + r.ms, 0)
+    return { data, totals, grand, series }
+  }, [pieces, projects, bs, now])
 
-  const range = bs.length ? { start: bs[0].start, end: bs[bs.length - 1].end } : { start: 0, end: 0 }
-  const totals = projects
-    .map((p) => ({ project: p, ms: sum(entries.filter((e) => e.projectId === p.id), range, now) }))
-    .sort((a, b) => b.ms - a.ms)
-  const grand = totals.reduce((s, r) => s + r.ms, 0)
+  const config = useMemo(
+    () =>
+      Object.fromEntries(
+        series.map(({ key, project }) => [key, { label: project?.name ?? 'No project', color: project ? projectColor(project) : NO_PROJECT_COLOR }]),
+      ) satisfies ChartConfig,
+    [series],
+  )
 
   return (
     <>
@@ -187,8 +214,8 @@ export default function ReportsPage() {
               <YAxis tickLine={false} axisLine={false} width={28} />
               <ChartTooltip content={<ChartTooltipContent />} />
               <ChartLegend content={<ChartLegendContent />} />
-              {projects.map((p, i) => (
-                <Bar isAnimationActive={false} key={p.id} dataKey={p.id} stackId="a" fill={`var(--color-${p.id})`} radius={i === projects.length - 1 ? [3, 3, 0, 0] : 0} />
+              {series.map(({ key }, i) => (
+                <Bar isAnimationActive={false} key={key} dataKey={key} stackId="a" fill={`var(--color-${key})`} radius={i === series.length - 1 ? [3, 3, 0, 0] : 0} />
               ))}
             </BarChart>
           </ChartContainer>
@@ -206,10 +233,10 @@ export default function ReportsPage() {
           </TableHeader>
           <TableBody>
             {totals.map((r) => (
-              <TableRow key={r.project.id}>
+              <TableRow key={r.key}>
                 <TableCell>
-                  <span className="flex items-center gap-2">
-                    <ProjectDot project={r.project} /> {r.project.name}
+                  <span className={cn('flex items-center gap-2', !r.project && 'text-muted-foreground')}>
+                    <ProjectDot project={r.project} /> {r.project?.name ?? 'No project'}
                   </span>
                 </TableCell>
                 <TableCell className="text-right">{formatHours(r.ms)}</TableCell>
@@ -218,8 +245,8 @@ export default function ReportsPage() {
             ))}
           </TableBody>
         </Table>
-        {projects.length === 0 && <p className="text-muted-foreground p-6 text-center text-sm">No projects yet. Time you track appears here by project.</p>}
-        {projects.length > 0 && grand === 0 && !rangeError && <p className="text-muted-foreground p-4 text-center text-sm">No time was tracked in this period.</p>}
+        {series.length === 0 && <p className="text-muted-foreground p-6 text-center text-sm">No projects yet. Time you track appears here by project.</p>}
+        {series.length > 0 && grand === 0 && !rangeError && <p className="text-muted-foreground p-4 text-center text-sm">No time was tracked in this period.</p>}
       </div>
     </>
   )

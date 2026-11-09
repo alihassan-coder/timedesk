@@ -6,7 +6,7 @@ name: Desktop on Linux
 
 on:
   push:
-    branches: [main, linux-e2e]
+    branches: [main, develop]
     paths:
       - 'apps/desktop/**'
       - 'apps/web/**'
@@ -37,6 +37,27 @@ jobs:
             libnss3 libxss1 libgbm1 libxtst6 libnotify4 libsecret-1-0 libgtk-3-0t64 libasound2t64
 
       - run: pnpm install --frozen-lockfile
+
+      # Electron downloads its program on first use. GitHub's download server sometimes answers 504, so it is cached
+      # between runs and fetched up front with a few tries, instead of failing the whole run on one bad moment.
+      - name: Cache the Electron program
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Download Electron (with retries)
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5; do
+            node -e "require('electron')" && exit 0
+            echo "Electron download failed (try $i), waiting before the next try"
+            rm -rf node_modules/electron/dist node_modules/electron/path.txt 2>/dev/null || true
+            sleep $((i * 15))
+          done
+          exit 1
 
       - name: Build the desktop app
         working-directory: apps/desktop

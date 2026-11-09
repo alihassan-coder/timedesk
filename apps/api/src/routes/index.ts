@@ -9,6 +9,13 @@ export function createRoutes(c: Controllers) {
 
   r.get('/me', c.me)
 
+  r.get('/account/export', c.account.export)
+  r.delete('/account', c.account.remove)
+
+  r.get('/reviews', c.reviews.recent)
+  r.get('/reviews/:week', c.reviews.get)
+  r.put('/reviews/:week', c.reviews.save)
+
   const admin = new Hono<AppEnv>()
   admin.use('*', requireAdmin)
   admin.get('/users', c.admin.listUsers)
@@ -28,14 +35,21 @@ export function createRoutes(c: Controllers) {
 
   r.get('/time-entries', c.time.list)
   r.get('/time-entries/running', c.time.running)
+  r.post('/time-entries', c.time.add)
   r.post('/time-entries/start', c.time.start)
   r.post('/time-entries/stop', c.time.stop)
 
   r.post('/activity', c.activity.ingest)
   r.get('/activity/summary', c.activity.summary)
   r.get('/activity/sessions', c.activity.sessions)
+  r.get('/activity/timeline', c.activity.timeline)
   r.delete('/activity/:id', c.activity.removeOne)
   r.delete('/activity', c.activity.clear)
+
+  r.post('/focus/sessions', c.focus.ingest)
+  r.get('/focus/sessions', c.focus.list)
+  r.get('/focus/summary', c.focus.summary)
+  r.delete('/focus/sessions', c.focus.clear)
 
   r.get('/integrations/google', c.google.status)
   r.patch('/integrations/google', c.google.settings)

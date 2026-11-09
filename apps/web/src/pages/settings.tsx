@@ -1,4 +1,5 @@
-import { Link, useSearchParams } from 'react-router'
+import { useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { Row } from '@/components/setting-row'
 import { useProfile } from '@/lib/auth-client'
 import { isDesktop } from '@/lib/desktop'
@@ -7,13 +8,14 @@ import { CalendarTab } from '@/pages/settings-calendar'
 import { DesktopTab } from '@/pages/settings-desktop'
 import { NotificationsTab } from '@/pages/settings-notifications'
 import { TimerTab } from '@/pages/settings-timer'
-import { Check, Monitor, Moon, RotateCcw, Sun } from 'lucide-react'
+import { Check, Download, FileSpreadsheet, Monitor, Moon, RotateCcw, Sun, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { Segmented } from '@/components/segmented'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
@@ -30,6 +32,7 @@ import {
   type TextSize,
 } from '@/lib/appearance'
 import { cn } from '@/lib/utils'
+import { deleteAccount, exportAllData, exportTimeCsv } from '@/lib/account'
 
 const ACCENTS: { id: Accent; label: string; color: string }[] = [
   { id: 'blue', label: 'Blue', color: 'oklch(0.546 0.245 262)' },
@@ -254,20 +257,159 @@ function IntegrationsTab() {
 function AccountTab() {
   const { user } = useProfile()
   return (
+    <div className="grid max-w-3xl gap-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Account</CardTitle>
+          <CardDescription>You sign in with your username or email. An admin approves each new account.</CardDescription>
+        </CardHeader>
+        <CardContent className="max-w-md space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="username">Username</Label>
+            <Input id="username" defaultValue={user?.username ?? ''} disabled />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" defaultValue={user?.email ?? ''} disabled />
+          </div>
+        </CardContent>
+      </Card>
+      <YourDataCard />
+      <DeleteAccountCard />
+    </div>
+  )
+}
+
+function YourDataCard() {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState('')
+  const exportJson = async () => {
+    setBusy(true)
+    setError('')
+    setDone('')
+    try {
+      await exportAllData()
+      setDone('Your data was downloaded.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not export your data.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
     <Card>
       <CardHeader>
-        <CardTitle>Account</CardTitle>
-        <CardDescription>You sign in with your username or email. An admin approves each new account.</CardDescription>
+        <CardTitle>Your data</CardTitle>
+        <CardDescription>Download a copy of what timedesk stores for you. It is yours to keep or move elsewhere.</CardDescription>
       </CardHeader>
-      <CardContent className="max-w-md space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="username">Username</Label>
-          <Input id="username" defaultValue={user?.username ?? ''} disabled />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" defaultValue={user?.email ?? ''} disabled />
-        </div>
+      <CardContent className="divide-y">
+        <Row
+          title="Everything (JSON)"
+          description="Projects, tasks, tracked time, weekly reviews, settings, Tempo chats and memories, and app activity. AI keys and Google tokens are not included."
+        >
+          <Button size="sm" variant="outline" aria-label="Download all my data as JSON" onClick={() => void exportJson()} disabled={busy}>
+            <Download /> {busy ? 'Preparing...' : 'Download'}
+          </Button>
+        </Row>
+        <Row title="Tracked time (CSV)" description="One row per timer session with date, start, end, hours, project and task. Opens in Excel or Google Sheets.">
+          <Button size="sm" variant="outline" aria-label="Download tracked time as CSV" onClick={exportTimeCsv}>
+            <FileSpreadsheet /> Download
+          </Button>
+        </Row>
+        {(error || done) && (
+          <p role={error ? 'alert' : 'status'} className={cn('pt-3 text-sm', error ? 'text-destructive' : 'text-muted-foreground')}>
+            {error || done}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function DeleteAccountCard() {
+  const { user } = useProfile()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const name = user?.username ?? user?.email ?? ''
+  const ready = password.length > 0 && confirm.trim() === name
+
+  const reset = (o: boolean) => {
+    setOpen(o)
+    if (!o) {
+      setPassword('')
+      setConfirm('')
+      setError('')
+    }
+  }
+  const submit = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await deleteAccount(password)
+      navigate('/login', { replace: true })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not delete the account.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="border-destructive/40">
+      <CardHeader>
+        <CardTitle>Delete account</CardTitle>
+        <CardDescription>
+          Removes your account and everything in it from timedesk for good: projects, tasks, tracked time, reviews, chats, memories, app activity, AI keys
+          and the Google Calendar connection. Events already in your Google Calendar stay there. Download your data first if you want a copy.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Dialog open={open} onOpenChange={reset}>
+          <DialogTrigger render={<Button variant="destructive" />}>
+            <Trash2 /> Delete my account
+          </DialogTrigger>
+          <DialogContent>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (ready && !busy) void submit()
+              }}
+            >
+              <DialogHeader>
+                <DialogTitle>Delete your account?</DialogTitle>
+                <DialogDescription>This cannot be undone. Everything you stored in timedesk is deleted right away.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                <Label htmlFor="delete-confirm">
+                  Type <span className="font-mono font-semibold">{name}</span> to confirm
+                </Label>
+                <Input id="delete-confirm" autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="delete-password">Your password</Label>
+                <Input id="delete-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              </div>
+              {error && (
+                <p role="alert" className="text-destructive text-sm">
+                  {error}
+                </p>
+              )}
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => reset(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="destructive" disabled={!ready || busy}>
+                  {busy ? 'Deleting...' : 'Delete everything'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   )

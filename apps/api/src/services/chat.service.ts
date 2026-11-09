@@ -1,5 +1,6 @@
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, notInArray, sql } from 'drizzle-orm'
 import { schema, type Db } from '@timedesk/db'
+import { batch } from '../utils/batch.ts'
 import { notFound } from '../utils/errors.ts'
 import type { SaveChat } from '../validators/index.ts'
 
@@ -30,30 +31,32 @@ export function createChatService(db: Db) {
       }
     },
 
-    /** Creates or replaces a chat with its full message list. Another person's chat id is reported as not found. */
+    /**
+     * Creates or replaces a chat with its full message list, as one unit. Another person's chat id is reported as not
+     * found and nothing of theirs is touched. Two saves of the same chat at once both succeed (the last one wins):
+     * messages are updated in place by id, and only the ones no longer in the list are removed.
+     */
     async save(userId: string, id: string, input: SaveChat) {
-      const [existing] = await db.select({ userId: c.userId }).from(c).where(eq(c.id, id))
-      if (existing && existing.userId !== userId) throw notFound('Chat')
-
       const now = new Date()
-      await db
-        .insert(c)
-        .values({ id, userId, title: input.title, updatedAt: now })
-        .onConflictDoUpdate({ target: c.id, set: { title: input.title, updatedAt: now, deletedAt: null } })
+      const mine = sql`exists (select 1 from ${c} where ${c.id} = ${id} and ${c.userId} = ${userId})`
+      const rows = input.messages.map((msg, position) => ({ message_id: msg.id, role: msg.role, parts: msg.parts, position }))
 
-      await db.delete(m).where(eq(m.chatId, id))
-      if (input.messages.length > 0) {
-        await db.insert(m).values(
-          input.messages.map((msg, position) => ({
-            id: crypto.randomUUID(),
-            chatId: id,
-            messageId: msg.id,
-            role: msg.role,
-            parts: msg.parts,
-            position,
-          })),
-        )
-      }
+      const [saved] = await batch(db, [
+        // The update only applies to a chat of this person, so a chat id that belongs to someone else returns no row.
+        db
+          .insert(c)
+          .values({ id, userId, title: input.title, updatedAt: now })
+          .onConflictDoUpdate({ target: c.id, set: { title: input.title, updatedAt: now, deletedAt: null }, setWhere: eq(c.userId, userId) })
+          .returning({ id: c.id }),
+        db.delete(m).where(and(eq(m.chatId, id), notInArray(m.messageId, input.messages.map((x) => x.id)), mine)),
+        db.execute(sql`
+          insert into ${m} (id, chat_id, message_id, role, parts, position)
+          select gen_random_uuid()::text, ${id}, x.message_id, x.role, x.parts, x.position
+          from jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) as x(message_id text, role text, parts jsonb, position integer)
+          where ${mine}
+          on conflict (chat_id, message_id) do update set role = excluded.role, parts = excluded.parts, position = excluded.position`),
+      ])
+      if (saved.length === 0) throw notFound('Chat')
       return { id, updatedAt: now }
     },
 

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { getDesktop, useUpdateStatus } from '@/lib/desktop'
+import { FocusGuardCard } from '@/features/focus'
 import { FloatingTimerCard } from '@/pages/widget-settings-card'
 
 /** Settings that only exist in the desktop app. Saved on this computer, not in your account. */
@@ -17,18 +18,57 @@ export function DesktopTab() {
   const [settings, setSettings] = useState<DesktopSettings | null>(null)
   const update = useUpdateStatus()
   const [checking, setChecking] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    void desktop?.info().then(setInfo)
-    void desktop?.getSettings().then(setSettings)
+    desktop
+      ?.info()
+      .then(setInfo)
+      .catch(() => undefined) // only the version badge needs it
+    desktop
+      ?.getSettings()
+      .then(setSettings)
+      .catch(() => setError('Could not read the desktop settings. Restart the app and try again.'))
   }, [desktop])
 
+  if (desktop && !settings && error) {
+    return (
+      <p role="alert" className="text-destructive text-sm">
+        {error}
+      </p>
+    )
+  }
   if (!desktop || !settings) return <p className="text-muted-foreground text-sm">These settings are available in the desktop app.</p>
 
-  const change = async (patch: Partial<DesktopSettings>) => setSettings(await desktop.setSettings(patch))
+  const change = async (patch: Partial<DesktopSettings>) => {
+    setError('')
+    try {
+      setSettings(await desktop.setSettings(patch))
+    } catch {
+      // The switch snaps back, because `settings` still holds what the app has saved.
+      setError('Could not save that setting. Try again.')
+    }
+  }
+
+  const checkUpdates = async () => {
+    setChecking(true)
+    setError('')
+    try {
+      await desktop.checkForUpdates()
+    } catch {
+      setError('Could not check for updates right now.')
+    } finally {
+      setChecking(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
+      {error && (
+        <p role="alert" className="text-destructive text-sm">
+          {error}
+        </p>
+      )}
       <Card>
         <CardHeader>
           <CardTitle>Startup and window</CardTitle>
@@ -45,6 +85,8 @@ export function DesktopTab() {
       </Card>
 
       <FloatingTimerCard settings={settings} change={(patch) => void change(patch)} />
+
+      <FocusGuardCard settings={settings} change={(patch) => void change(patch)} />
 
       <Card>
         <CardHeader>
@@ -80,11 +122,7 @@ export function DesktopTab() {
           <Button
             variant="outline"
             disabled={checking || update.state === 'downloading'}
-            onClick={async () => {
-              setChecking(true)
-              await desktop.checkForUpdates()
-              setChecking(false)
-            }}
+            onClick={() => void checkUpdates()}
           >
             <RefreshCw className={checking ? 'animate-spin' : ''} /> Check for updates
           </Button>

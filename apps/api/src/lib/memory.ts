@@ -23,6 +23,8 @@ export interface MemoryProvider {
   remember(userId: string, keys: ProviderKeys, turns: Turn[]): Promise<void>
   list(userId: string, keys: ProviderKeys): Promise<MemoryItem[]>
   forget(userId: string, keys: ProviderKeys, id: string): Promise<boolean>
+  /** Removes everything remembered about this user (when the account is deleted). */
+  forgetAll(userId: string, keys: ProviderKeys): Promise<void>
 }
 
 export const noMemory: MemoryProvider = {
@@ -31,6 +33,7 @@ export const noMemory: MemoryProvider = {
   remember: async () => {},
   list: async () => [],
   forget: async () => false,
+  forgetAll: async () => {},
 }
 
 /**
@@ -45,26 +48,66 @@ export function memorySetup(keys: ProviderKeys) {
   return null
 }
 
+/** At most this many mem0 setups (one per API key, each with its own database pool) are kept open at once. */
+const MAX_INSTANCES = 8
+/** Looking memories up happens before the answer starts: never let it hold the chat up for long. */
+const SEARCH_TIMEOUT_MS = 1_500
+/**
+ * Remembering runs after the answer, but the response only closes when it is done. mem0 asks an LLM to pick out the
+ * facts, which rarely fits in 1.5 seconds, so it gets a little longer; past that the reply ends and the work carries on
+ * by itself while the process lives.
+ */
+const REMEMBER_TIMEOUT_MS = 8_000
+
+/** Resolves with `fallback` when `work` takes longer than `ms` (or fails). The work itself is not cancelled. */
+export async function within<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms)
+  })
+  try {
+    return await Promise.race([work.catch(() => fallback), late])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function createMem0Memory(databaseUrl: string): MemoryProvider {
+  /** Least recently used first (a Map keeps insertion order; a hit moves the entry to the end). */
   const instances = new Map<string, Memory>()
+
+  /** mem0 has no close of its own; its pgvector store does. Wait a minute first, so a request still using it can finish. */
+  function retire(m: Memory) {
+    const store = (m as unknown as { vectorStore?: { close?: () => Promise<void> } }).vectorStore
+    const timer = setTimeout(() => void store?.close?.().catch(() => {}), 60_000)
+    timer.unref?.()
+  }
 
   function instance(keys: ProviderKeys): Memory | null {
     const setup = memorySetup(keys)
     if (!setup) return null
     const id = createHash('sha256').update(setup.apiKey).digest('hex').slice(0, 16)
     let m = instances.get(id)
-    if (!m) {
-      m = new Memory({
-        version: 'v1.1',
-        embedder: { provider: setup.embedder, config: { apiKey: setup.apiKey, model: setup.embeddingModel, embeddingDims: setup.dims } },
-        vectorStore: {
-          provider: 'pgvector',
-          config: { collectionName: 'timedesk_memories_' + setup.dims, embeddingModelDims: setup.dims, dimension: setup.dims, connectionString: databaseUrl },
-        },
-        llm: { provider: setup.embedder, config: { apiKey: setup.apiKey, model: setup.llmModel } },
-        disableHistory: true,
-      })
+    if (m) {
+      instances.delete(id)
       instances.set(id, m)
+      return m
+    }
+    m = new Memory({
+      version: 'v1.1',
+      embedder: { provider: setup.embedder, config: { apiKey: setup.apiKey, model: setup.embeddingModel, embeddingDims: setup.dims } },
+      vectorStore: {
+        provider: 'pgvector',
+        config: { collectionName: 'timedesk_memories_' + setup.dims, embeddingModelDims: setup.dims, dimension: setup.dims, connectionString: databaseUrl },
+      },
+      llm: { provider: setup.embedder, config: { apiKey: setup.apiKey, model: setup.llmModel } },
+      disableHistory: true,
+    })
+    instances.set(id, m)
+    while (instances.size > MAX_INSTANCES) {
+      const [oldest, old] = instances.entries().next().value as [string, Memory]
+      instances.delete(oldest)
+      retire(old)
     }
     return m
   }
@@ -76,12 +119,17 @@ export function createMem0Memory(databaseUrl: string): MemoryProvider {
     async search(userId, keys, query, limit = 5) {
       const m = instance(keys)
       if (!m) return []
-      return (await m.search(query, { topK: limit, filters: { user_id: userId } })).results.map(toItem)
+      const search = m.search(query, { topK: limit, filters: { user_id: userId } }).then((r) => r.results.map(toItem))
+      return within(search, SEARCH_TIMEOUT_MS, [])
     },
     async remember(userId, keys, turns) {
       const m = instance(keys)
       if (!m) return
-      await m.add(turns, { userId })
+      await within(
+        m.add(turns, { userId }).then(() => undefined),
+        REMEMBER_TIMEOUT_MS,
+        undefined,
+      )
     },
     async list(userId, keys) {
       const m = instance(keys)
@@ -96,6 +144,11 @@ export function createMem0Memory(databaseUrl: string): MemoryProvider {
       if (!mine) return false
       await m.delete(id)
       return true
+    },
+    async forgetAll(userId, keys) {
+      const m = instance(keys)
+      if (!m) return
+      await m.deleteAll({ userId })
     },
   }
 }

@@ -61,6 +61,8 @@ Tempo's memory (mem0) needs the `vector` extension. If memory errors, run in the
 
 Without this section everything else works; the Calendar page and Settings -> Calendar simply say Google Calendar is not set up. With it, each person can connect their own Google account: their events show in timedesk, they can add and edit events here, and tasks with a due date are mirrored to Google as all-day events (changes go both ways).
 
+**The quick way:** run `bash scripts/setup-google-calendar.sh` from the repository root. It opens each Google page, says exactly what to click, saves the keys to `apps/api/.env`, and lets you try it on your computer with a throwaway database (`pnpm --filter @timedesk/api dev:google`) before the live app. The steps below are the same, by hand.
+
 **What you need from Google** (free, about 10 minutes, one time):
 
 1. Go to the [Google Cloud console](https://console.cloud.google.com/) and create a project (any name, for example "timedesk").

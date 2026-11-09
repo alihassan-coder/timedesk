@@ -34,6 +34,12 @@ describe('recurring tasks', () => {
   it('monthly keeps the day number', () => {
     expect(nextDue('2026-11-15', { freq: 'monthly' })).toBe('2026-12-15')
   })
+  it('monthly on a day the next month does not have lands on its last day, not in the month after', () => {
+    expect(nextDue('2026-01-31', { freq: 'monthly' })).toBe('2026-02-28')
+    expect(nextDue('2028-01-31', { freq: 'monthly' })).toBe('2028-02-29') // leap year
+    expect(nextDue('2026-03-31', { freq: 'monthly' })).toBe('2026-04-30')
+    expect(nextDue('2026-12-31', { freq: 'monthly' })).toBe('2027-01-31') // across a year end
+  })
   it('custom repeats every N days', () => {
     expect(nextDue('2026-11-04', { freq: 'custom', every: 3 })).toBe('2026-11-07')
   })

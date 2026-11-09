@@ -74,6 +74,39 @@ describe('saved chats', () => {
     expect(chats.map((c: { id: string }) => c.id)).not.toContain('chat-gone')
   })
 
+  it('two saves of the same chat at the same moment both succeed, and the chat keeps one copy of each message', async () => {
+    const first = [userMsg('c1', 'hello')]
+    const second = [userMsg('c1', 'hello'), botMsg('c2', 'hi there')]
+    const results = await Promise.all([ann.put('/chats/chat-race', { title: 'Race', messages: first }), ann.put('/chats/chat-race', { title: 'Race', messages: second })])
+    expect(results.map((r) => r.status)).toEqual([200, 200])
+    const { chat } = await (await ann.get('/chats/chat-race')).json()
+    const ids = chat.messages.map((x: { id: string }) => x.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids[0]).toBe('c1')
+  })
+
+  it('a shorter list removes the messages that are gone and keeps the order', async () => {
+    await ann.put('/chats/chat-trim', { title: 'Trim', messages: [userMsg('t1', 'a'), botMsg('t2', 'b'), userMsg('t3', 'c')] })
+    await ann.put('/chats/chat-trim', { title: 'Trim', messages: [userMsg('t3', 'c'), userMsg('t1', 'a')] })
+    const { chat } = await (await ann.get('/chats/chat-trim')).json()
+    expect(chat.messages.map((x: { id: string }) => x.id)).toEqual(['t3', 't1'])
+  })
+
+  it('refuses two messages with the same id, or an absurdly long id, and keeps what was saved', async () => {
+    await ann.put('/chats/chat-dup', { title: 'Dup', messages: [userMsg('d1', 'keep me')] })
+    expect((await ann.put('/chats/chat-dup', { title: 'Dup', messages: [userMsg('d1', 'a'), userMsg('d1', 'b')] })).status).toBe(422)
+    expect((await ann.put('/chats/chat-dup', { title: 'Dup', messages: [userMsg('x'.repeat(201), 'a')] })).status).toBe(422)
+    const { chat } = await (await ann.get('/chats/chat-dup')).json()
+    expect(chat.messages).toEqual([userMsg('d1', 'keep me')])
+  })
+
+  it('a deleted chat of someone else still cannot be taken over by its id', async () => {
+    await ann.put('/chats/chat-ann-deleted', { title: 'Mine', messages: [userMsg('q1', 'x')] })
+    await ann.del('/chats/chat-ann-deleted')
+    expect((await bob.put('/chats/chat-ann-deleted', { title: 'taken', messages: [userMsg('q2', 'y')] })).status).toBe(404)
+    expect((await bob.get('/chats/chat-ann-deleted')).status).toBe(404)
+  })
+
   it('rejects an empty title and an unknown message role', async () => {
     expect((await ann.put('/chats/chat-bad', { title: '  ', messages: [] })).status).toBe(422)
     expect((await ann.put('/chats/chat-bad', { title: 'ok', messages: [{ id: '1', role: 'robot', parts: [] }] })).status).toBe(422)
@@ -93,6 +126,22 @@ describe('saved settings', () => {
     const { data } = await (await ann.get('/settings')).json()
     expect(data.appearance).toEqual({ accent: 'violet', mode: 'dark' })
     expect(data.aiPrefs.selected).toEqual({ provider: 'openai', model: 'gpt-4.1' })
+  })
+
+  it('changes sent at the same moment are all kept', async () => {
+    await Promise.all([
+      ann.patch('/settings', { notifications: { sound: true } }),
+      ann.patch('/settings', { desktop: { tray: true } }),
+      ann.patch('/settings', { timer: { dailyGoalMinutes: 300 } }),
+    ])
+    const { data } = await (await ann.get('/settings')).json()
+    expect(data).toMatchObject({ notifications: { sound: true }, desktop: { tray: true }, timer: { dailyGoalMinutes: 300 }, appearance: { accent: 'violet', mode: 'dark' } })
+  })
+
+  it('a group sent again replaces that group only', async () => {
+    const res = await (await ann.patch('/settings', { appearance: { mode: 'light' } })).json()
+    expect(res.data.appearance).toEqual({ mode: 'light' })
+    expect(res.data.timer).toEqual({ dailyGoalMinutes: 300 })
   })
 
   it('keeps each person\'s settings separate', async () => {

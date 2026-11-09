@@ -23,15 +23,21 @@ export default function RegisterPage() {
     if (form.password.length < 8) return setError('Password must be at least 8 characters.')
     if (form.password !== form.confirm) return setError('The two passwords do not match.')
     setBusy(true)
-    const { error: err } = await authClient.signUp.email({
-      name: form.name.trim(),
-      username: form.username,
-      email: form.email.trim(),
-      password: form.password,
-    })
-    setBusy(false)
-    if (err) return setError(err.message ?? 'Could not create the account.')
-    setDone(true)
+    try {
+      const { error: err } = await authClient.signUp.email({
+        name: form.name.trim(),
+        username: form.username,
+        email: form.email.trim(),
+        password: form.password,
+      })
+      if (err) return setError(err.message ?? 'Could not create the account.')
+      setDone(true)
+    } catch {
+      // The auth client throws when the request never reached the server.
+      setError('Could not reach the server. Check your connection and try again.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   if (done) {

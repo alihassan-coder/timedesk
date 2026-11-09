@@ -17,6 +17,7 @@ import {
   Sparkles,
   Sun,
   Table2,
+  MoonStar,
 } from 'lucide-react'
 import { LogoMark, Wordmark } from '@/components/logo'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -46,14 +47,11 @@ import {
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar'
-import { resetStore } from '@/data/store'
 import { isDesktop } from '@/lib/desktop'
-import { resetChats } from '@/features/assistant/chat-store'
-import { resetAi } from '@/lib/ai/server'
-import { clearAllCaches } from '@/lib/cache'
-import { stopSettingsSync } from '@/lib/settings-sync'
+import { signOutHere } from '@/lib/account'
+import { DESKTOP_VERSION } from '@/lib/downloads'
 import { navGroupsFor } from '@/lib/nav'
-import { signOut, useProfile } from '@/lib/auth-client'
+import { useProfile } from '@/lib/auth-client'
 import { toggleMode, useAppearance } from '@/lib/appearance'
 
 const ICONS = {
@@ -61,6 +59,7 @@ const ICONS = {
   tasks: ListChecks,
   projects: FolderKanban,
   timesheet: Table2,
+  wrapup: MoonStar,
   reports: BarChart3,
   review: CalendarCheck,
   apps: Monitor,
@@ -132,7 +131,7 @@ function GetAppCard() {
       <div className="flex items-center gap-2">
         <Download className="size-4" />
         <p className="text-sm font-medium">Desktop app</p>
-        <Badge variant="secondary" className="ml-auto">v0.1.0</Badge>
+        <Badge variant="secondary" className="ml-auto">v{DESKTOP_VERSION}</Badge>
       </div>
       <p className="text-muted-foreground text-xs">Track apps and sites automatically and get native reminders.</p>
       <Button size="sm" className="w-full" render={<Link to="/download" />}>
@@ -175,7 +174,7 @@ function ProfileMenu() {
               {dark ? 'Light mode' : 'Dark mode'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={async () => { await signOut(); resetStore(); resetAi(); resetChats(); stopSettingsSync(); clearAllCaches(); navigate('/login', { replace: true }) }}>
+            <DropdownMenuItem onClick={async () => { await signOutHere(); navigate('/login', { replace: true }) }}>
               <LogOut /> Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>

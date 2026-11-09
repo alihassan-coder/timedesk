@@ -2,10 +2,12 @@
   "name": "@timedesk/desktop",
   "private": true,
   "version": "0.3.1",
+  "license": "MIT",
   "description": "timedesk desktop app for Windows and Linux",
   "author": "timedesk",
   "homepage": "https://github.com/alihassan-coder/timedesk",
   "main": "dist/main.cjs",
+  "desktopName": "timedesk.desktop",
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev.mjs",

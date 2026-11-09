@@ -1,6 +1,9 @@
-import { DEFAULT_DESKTOP_SETTINGS, type DesktopSettings, type TimerState, type WidgetMode } from '@timedesk/shared'
+import { DEFAULT_DESKTOP_SETTINGS, sanitizeFocusList, type DesktopSettings, type TimerState, type UpdateStatus, type WidgetMode } from '@timedesk/shared'
 
-/** Pure rules for the floating timer, the window title, idle time and the settings. No Electron in here, so they are tested directly. */
+/**
+ * Pure rules for the floating timer, the window title, idle time, the tray text, update status and the settings. No Electron
+ * in here, so they are tested directly.
+ */
 
 export interface Rect {
   x: number
@@ -99,10 +102,46 @@ export function createIdleWatcher() {
       }
       return null
     },
+    /**
+     * The computer woke up or was unlocked. Returns when the person left (the earlier of going idle and going to sleep)
+     * if that was at least `limitMinutes` ago with the timer running. Either way they are back now, so idle tracking starts over.
+     */
+    resumed(suspendedAt: number, now: number, running: boolean, limitMinutes: number): { idleSince: number } | null {
+      const since = idleSince !== null ? Math.min(idleSince, suspendedAt) : suspendedAt
+      idleSince = null
+      if (!running || limitMinutes <= 0 || now - since < limitMinutes * 60_000) return null
+      return { idleSince: since }
+    },
     reset() {
       idleSince = null
     },
   }
+}
+
+/** "Timer running: Write docs (1h 05m)" or "No timer running": the tray tooltip and menu line, which only change once a minute. */
+export function trayStatus(timer: TimerState, now: number): string {
+  if (!timer.running) return 'No timer running'
+  let elapsed = ''
+  if (timer.startedAt) {
+    const mins = Math.max(0, Math.floor((now - timer.startedAt) / 60_000))
+    elapsed = mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`
+  }
+  return `Timer running: ${timer.label || 'Stopwatch'} (${elapsed})`
+}
+
+/** A failed later check must not hide an update that is already downloaded and ready to install. */
+export function mergeUpdateStatus(prev: UpdateStatus, next: UpdateStatus): UpdateStatus {
+  if (prev.state === 'ready' && next.state === 'error') return prev
+  return next
+}
+
+/**
+ * How long to wait before reloading a main window whose page crashed: at once the first time, then longer the more it
+ * has crashed in the last few minutes, so a page that crashes on load does not spin.
+ */
+export function crashReloadDelay(recentCrashes: number): number {
+  if (recentCrashes <= 1) return 0
+  return Math.min(60_000, 1000 * 2 ** (recentCrashes - 1))
 }
 
 /** "12 minutes", "1 hour 5 minutes". */
@@ -123,9 +162,12 @@ const MODES: WidgetMode[] = ['compact', 'expanded', 'dock', 'pomodoro']
 export function sanitizeDesktopSettings(current: DesktopSettings, patch: unknown): DesktopSettings {
   const next: DesktopSettings = { ...DEFAULT_DESKTOP_SETTINGS, ...current }
   const p = (patch && typeof patch === 'object' ? patch : {}) as Record<string, unknown>
-  for (const k of ['autoStart', 'closeToTray', 'trackApps', 'trackTitles', 'shortcuts'] as const) if (typeof p[k] === 'boolean') next[k] = p[k]
+  for (const k of ['autoStart', 'closeToTray', 'trackApps', 'trackTitles', 'shortcuts', 'focusGuard'] as const) if (typeof p[k] === 'boolean') next[k] = p[k]
   if (p.widget === 'auto' || p.widget === 'always' || p.widget === 'never') next.widget = p.widget
   if (typeof p.widgetMode === 'string' && MODES.includes(p.widgetMode as WidgetMode)) next.widgetMode = p.widgetMode as WidgetMode
   if (typeof p.idleMinutes === 'number' && Number.isFinite(p.idleMinutes)) next.idleMinutes = Math.min(240, Math.max(0, Math.round(p.idleMinutes)))
+  if (Array.isArray(p.focusApps)) next.focusApps = sanitizeFocusList(p.focusApps)
+  if (Array.isArray(p.focusSites)) next.focusSites = sanitizeFocusList(p.focusSites)
+  if (typeof p.focusNudgeSeconds === 'number' && Number.isFinite(p.focusNudgeSeconds)) next.focusNudgeSeconds = Math.min(600, Math.max(5, Math.round(p.focusNudgeSeconds)))
   return next
 }

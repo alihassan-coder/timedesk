@@ -1,4 +1,5 @@
-import { and, desc, eq, gte, ilike, lt, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, ilike, isNull, lt, or, sql } from 'drizzle-orm'
+import { learnAppProjects, type ActivityBlock } from '@timedesk/shared'
 import { schema, type Db } from '@timedesk/db'
 import { notFound } from '../utils/errors.ts'
 import type { ActivityBatch } from '../validators/index.ts'
@@ -66,6 +67,41 @@ export function createActivityService(db: Db) {
     async removeOne(userId: string, id: string) {
       const gone = await db.delete(a).where(and(eq(a.userId, userId), eq(a.id, id))).returning({ id: a.id })
       if (gone.length === 0) throw notFound('Activity')
+    },
+
+    /**
+     * The day's app use as stretches (the same app in front, joined when less than a minute apart), and which project
+     * each app is usually tracked on (learned from the last 30 days). Used to fill in the untracked parts of a day.
+     * App names only: window titles are not needed for this and are left out.
+     */
+    async timeline(userId: string, range: { from: Date; to: Date }) {
+      const toBlocks = (rows: { app: string; startedAt: Date; seconds: number }[]) => {
+        const out: ActivityBlock[] = []
+        for (const r of rows) {
+          const start = r.startedAt.getTime()
+          const end = start + r.seconds * 1000
+          const last = out[out.length - 1]
+          if (last && last.app === r.app && start - last.end <= 60_000) last.end = Math.max(last.end, end)
+          else out.push({ app: r.app, start, end })
+        }
+        return out
+      }
+      const cols = { app: a.app, startedAt: a.startedAt, seconds: a.seconds }
+      const day = await db.select(cols).from(a).where(mine(userId, range)).orderBy(asc(a.startedAt)).limit(20_000)
+      const since = new Date(range.to.getTime() - 30 * 86_400_000)
+      const [history, entries] = await Promise.all([
+        db.select(cols).from(a).where(mine(userId, { from: since, to: range.to })).orderBy(asc(a.startedAt)).limit(50_000),
+        db
+          .select({ id: schema.timeEntries.id, taskId: schema.timeEntries.taskId, projectId: schema.timeEntries.projectId, startedAt: schema.timeEntries.startedAt, endedAt: schema.timeEntries.endedAt })
+          .from(schema.timeEntries)
+          .where(and(eq(schema.timeEntries.userId, userId), isNull(schema.timeEntries.deletedAt), gte(schema.timeEntries.startedAt, since))),
+      ])
+      const appProjects = learnAppProjects(
+        toBlocks(history),
+        entries.map((e) => ({ ...e, startedAt: e.startedAt.getTime(), endedAt: e.endedAt?.getTime() ?? null })),
+        Date.now(),
+      )
+      return { blocks: toBlocks(day), appProjects }
     },
 
     /** Privacy control: forget everything the desktop app recorded for this person. */

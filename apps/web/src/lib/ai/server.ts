@@ -93,5 +93,8 @@ export function useAi() {
   // Use the chosen model if it is still available, otherwise the first one we can offer.
   const current = all.find((m) => m.provider === prefs.selected?.provider && m.model === prefs.selected?.model) ?? all[0] ?? null
 
-  return { ...s, current, select: aiActions.select, hasKey: s.providers.length > 0 }
+  // The keys could not be loaded and nothing is cached: say so instead of asking for a key that may already be saved.
+  const loadFailed = s.loaded && !!s.error && s.providers.length === 0 && s.keys.length === 0
+
+  return { ...s, current, select: aiActions.select, hasKey: s.providers.length > 0, loadFailed, retry: refreshAi }
 }

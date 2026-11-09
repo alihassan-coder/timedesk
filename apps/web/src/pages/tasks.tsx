@@ -1,15 +1,17 @@
-import { useState } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 import { Calendar, CalendarDays, CalendarRange, ChevronLeft, ChevronRight, KanbanSquare, List, Plus, Repeat } from 'lucide-react'
 import {
   DUE_BUCKET_LABEL,
   DUE_BUCKET_ORDER,
   addDays,
   addMonths,
-  dueBucket,
+  dueBucketOn,
   monthGrid,
   startOfWeek,
   toDateKey,
+  type DueBucket,
   type Priority,
+  type Project,
   type Recurrence,
   type Task,
   type TaskStatus,
@@ -99,10 +101,17 @@ export default function TasksPage() {
     setView('day')
   }
 
-  const shown = tasks.filter(
-    (t) =>
-      (projectFilter === 'all' || t.projectId === projectFilter || (projectFilter === 'none' && !t.projectId)) &&
-      t.title.toLowerCase().includes(query.toLowerCase()),
+  const projectsById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
+  // The chosen project was deleted (here or on another device): show everything again.
+  const filter = projectFilter !== 'all' && projectFilter !== 'none' && !projectsById.has(projectFilter) ? 'all' : projectFilter
+  // Typing stays responsive with many tasks: the list filters a beat behind the input.
+  const search = useDeferredValue(query).toLowerCase()
+  const shown = useMemo(
+    () =>
+      tasks.filter(
+        (t) => (filter === 'all' || t.projectId === filter || (filter === 'none' && !t.projectId)) && (!search || t.title.toLowerCase().includes(search)),
+      ),
+    [tasks, filter, search],
   )
   const calendar = view === 'day' || view === 'week' || view === 'month'
   // Google Calendar events for the days on screen, when the calendar is connected. Shown read-only next to the tasks.
@@ -116,7 +125,7 @@ export default function TasksPage() {
             const grid = monthGrid(anchor)
             return [grid[0][0], addDays(grid[grid.length - 1][6], 1)]
           })()
-  const { events } = useGoogleEvents(rangeFrom, rangeTo, calendar && google?.connected === true)
+  const { events, error: eventsError } = useGoogleEvents(rangeFrom, rangeTo, calendar && google?.connected === true)
   const calendarProps = { tasks: shown, anchor, now, events, onOpenDay: openDay, onAdd: (day: string) => setAdding({ due: day }) }
 
   return (
@@ -146,7 +155,7 @@ export default function TasksPage() {
         <Input className="w-full sm:w-56" placeholder="Search tasks" value={query} onChange={(e) => setQuery(e.target.value)} />
         <SimpleSelect
           className="w-44"
-          value={projectFilter}
+          value={filter}
           onChange={setProjectFilter}
           options={[
             { value: 'all', label: 'All projects' },
@@ -175,8 +184,14 @@ export default function TasksPage() {
         </div>
       )}
 
-      {view === 'list' && <ListView tasks={shown} now={now} />}
-      {view === 'board' && <BoardView tasks={shown} now={now} />}
+      {calendar && eventsError && (
+        <p role="alert" className="text-destructive text-sm">
+          Could not load your Google Calendar events. {eventsError}
+        </p>
+      )}
+
+      {view === 'list' && <ListView tasks={shown} today={today} projectsById={projectsById} />}
+      {view === 'board' && <BoardView tasks={shown} now={now} projectsById={projectsById} />}
       {view === 'day' && <DayView {...calendarProps} />}
       {view === 'week' && <WeekView {...calendarProps} />}
       {view === 'month' && <MonthView {...calendarProps} />}
@@ -186,14 +201,34 @@ export default function TasksPage() {
   )
 }
 
-function ListView({ tasks, now }: { tasks: Task[]; now: number }) {
-  const open = tasks.filter((t) => t.status !== 'done')
-  const done = tasks.filter((t) => t.status === 'done')
+const DONE_PAGE = 20
+
+function ListView({ tasks, today, projectsById }: { tasks: Task[]; today: string; projectsById: Map<string, Project> }) {
+  const [doneShown, setDoneShown] = useState(DONE_PAGE)
+  // One pass over the tasks, not one filter per bucket. Completed: latest first.
+  const { buckets, done } = useMemo(() => {
+    const buckets = new Map<DueBucket, Task[]>()
+    const done: Task[] = []
+    for (const t of tasks) {
+      if (t.status === 'done') {
+        done.push(t)
+        continue
+      }
+      const b = dueBucketOn(t.due, today)
+      const list = buckets.get(b)
+      if (list) list.push(t)
+      else buckets.set(b, [t])
+    }
+    done.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
+    return { buckets, done }
+  }, [tasks, today])
+  const projectOf = (t: Task) => (t.projectId ? (projectsById.get(t.projectId) ?? null) : null)
+
   return (
     <div className="space-y-6">
       {DUE_BUCKET_ORDER.map((bucket) => {
-        const items = open.filter((t) => dueBucket(t.due, now) === bucket)
-        if (items.length === 0) return null
+        const items = buckets.get(bucket)
+        if (!items) return null
         return (
           <section key={bucket} className="space-y-2">
             <h2 className="flex items-center gap-2 text-sm font-medium">
@@ -202,7 +237,7 @@ function ListView({ tasks, now }: { tasks: Task[]; now: number }) {
             </h2>
             <ul className="divide-y rounded-lg border">
               {items.map((t) => (
-                <TaskRow key={t.id} task={t} now={now} />
+                <TaskRow key={t.id} task={t} today={today} project={projectOf(t)} />
               ))}
             </ul>
           </section>
@@ -214,10 +249,15 @@ function ListView({ tasks, now }: { tasks: Task[]; now: number }) {
             Completed <Badge variant="secondary">{done.length}</Badge>
           </h2>
           <ul className="divide-y rounded-lg border">
-            {done.map((t) => (
-              <TaskRow key={t.id} task={t} now={now} />
+            {done.slice(0, doneShown).map((t) => (
+              <TaskRow key={t.id} task={t} today={today} project={projectOf(t)} />
             ))}
           </ul>
+          {done.length > doneShown && (
+            <Button size="sm" variant="ghost" onClick={() => setDoneShown((n) => n + DONE_PAGE * 5)}>
+              Show more ({done.length - doneShown} more)
+            </Button>
+          )}
         </section>
       )}
       {tasks.length === 0 && <p className="text-muted-foreground text-sm">No tasks match. Clear the search or add a task.</p>}
@@ -227,8 +267,7 @@ function ListView({ tasks, now }: { tasks: Task[]; now: number }) {
 
 const COLUMN_DOT: Record<TaskStatus, string> = { todo: 'bg-muted-foreground/50', in_progress: 'bg-primary', done: 'bg-emerald-500' }
 
-function BoardView({ tasks, now }: { tasks: Task[]; now: number }) {
-  const { projects } = useStore()
+function BoardView({ tasks, now, projectsById }: { tasks: Task[]; now: number; projectsById: Map<string, Project> }) {
   const columns = Object.keys(STATUS_LABEL) as TaskStatus[]
   return (
     <div className="grid gap-4 md:grid-cols-3">
@@ -246,7 +285,7 @@ function BoardView({ tasks, now }: { tasks: Task[]; now: number }) {
             </h2>
             <div className="flex-1 space-y-2">
               {items.map((t) => {
-                const project = projects.find((p) => p.id === t.projectId)
+                const project = t.projectId ? projectsById.get(t.projectId) : undefined
                 return (
                   <div
                     key={t.id}
@@ -325,7 +364,7 @@ function NewTaskForm({ defaultDue, onClose }: { defaultDue: string; onClose: () 
       >
         <div className="space-y-2">
           <Label htmlFor="title">Title</Label>
-          <Input id="title" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What needs doing?" />
+          <Input id="title" autoFocus maxLength={300} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What needs doing?" />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">

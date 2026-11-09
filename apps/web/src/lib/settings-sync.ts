@@ -34,9 +34,14 @@ function writeMeta(userId: string, at: number) {
 }
 
 let stop: (() => void) | null = null
+// Bumped by every start and stop. A sync whose number is no longer current was cancelled while it waited
+// for the network, and must not apply settings or subscribe (that would leak listeners or mix two people).
+let generation = 0
 
 export async function startSettingsSync(userId: string) {
   stop?.()
+  stop = null
+  const mine = ++generation
 
   let applyingRemote = false
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -55,6 +60,7 @@ export async function startSettingsSync(userId: string) {
 
   try {
     const remote = await api<Remote>('/settings')
+    if (mine !== generation) return
     const remoteTime = remote.updatedAt ? new Date(remote.updatedAt).getTime() : 0
     const hasRemote = Object.keys(remote.data).length > 0
 
@@ -72,6 +78,7 @@ export async function startSettingsSync(userId: string) {
   } catch {
     // offline: keep using local settings
   }
+  if (mine !== generation) return
 
   const offA = subscribeAppearance(onLocalChange)
   const offB = subscribeAiPrefs(onLocalChange)
@@ -87,6 +94,7 @@ export async function startSettingsSync(userId: string) {
 }
 
 export function stopSettingsSync() {
+  generation++
   stop?.()
   stop = null
 }

@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { schema } from '@timedesk/db'
 import { api, approvedMember, createTestApp, type TestApp } from './helpers.ts'
@@ -43,5 +44,26 @@ describe('AI provider keys', () => {
   it('removes a key', async () => {
     expect((await me.del('/ai/keys/openai')).status).toBe(204)
     expect((await (await me.get('/ai/keys')).json()).keys).toEqual([])
+  })
+})
+
+describe('a stored key that can no longer be decrypted', () => {
+  it('is listed as invalid, and the export, the model list and the rest keep working', async () => {
+    await me.put('/ai/keys/groq', { key: 'gsk-good-key-12345678' })
+    await me.put('/ai/keys/xai', { key: 'xai-will-break-1234' })
+    await t.db.update(schema.aiProviderKeys).set({ encryptedKey: 'v1.broken.broken.broken' }).where(eq(schema.aiProviderKeys.provider, 'xai'))
+
+    const keys = (await (await me.get('/ai/keys')).json()).keys
+    expect(keys).toEqual(expect.arrayContaining([expect.objectContaining({ provider: 'groq', last4: '5678' }), expect.objectContaining({ provider: 'xai', invalid: true })]))
+
+    const exported = await me.get('/account/export')
+    expect(exported.status).toBe(200)
+    expect((await exported.json()).aiKeysSaved).toEqual(expect.arrayContaining(['groq', 'xai']))
+
+    // saving it again repairs it
+    await me.put('/ai/keys/xai', { key: 'xai-fixed-key-9999' })
+    const fixed = (await (await me.get('/ai/keys')).json()).keys.find((k: { provider: string }) => k.provider === 'xai')
+    expect(fixed).toMatchObject({ last4: '9999' })
+    expect(fixed.invalid).toBeUndefined()
   })
 })

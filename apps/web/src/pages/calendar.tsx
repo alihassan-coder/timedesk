@@ -27,13 +27,29 @@ const weekTitle = (anchor: string) =>
   new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).formatRange(dateOf(startOfWeek(anchor)), dateOf(addDays(startOfWeek(anchor), 6)))
 
 export default function CalendarPage() {
-  const { status, loading } = useGoogleStatus()
+  const { status, loading, error, refresh } = useGoogleStatus()
+  const [retrying, setRetrying] = useState(false)
 
   return (
     <>
       <PageHeader title="Calendar" description="Your Google Calendar events next to your tasks. Changes go both ways." />
       {loading ? (
         <p className="text-muted-foreground text-sm">Loading...</p>
+      ) : !status && error ? (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-destructive">Could not check Google Calendar. Check your connection and try again.</span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={retrying}
+            onClick={() => {
+              setRetrying(true)
+              void refresh().finally(() => setRetrying(false))
+            }}
+          >
+            {retrying ? <Loader2 className="animate-spin" /> : <RefreshCw />} Retry
+          </Button>
+        </div>
       ) : !status?.configured ? (
         <NotSetUp />
       ) : !status.connected ? (

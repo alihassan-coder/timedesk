@@ -23,9 +23,13 @@ export const authHeaders = (): Record<string, string> => (bearer ? { Authorizati
 
 /** Signs out and forgets the token. Use this instead of authClient.signOut. */
 export async function signOut() {
-  await authClient.signOut()
-  bearer = ''
-  await getDesktop()?.tokens.clear()
+  try {
+    await authClient.signOut()
+  } finally {
+    // Even when the server cannot be reached, this device forgets the login.
+    bearer = ''
+    await getDesktop()?.tokens.clear().catch(() => undefined)
+  }
 }
 
 export const authClient = createAuthClient({
@@ -56,22 +60,70 @@ export const authClient = createAuthClient({
   ],
 })
 
-/** The signed-in person, shaped for the UI. `null` while loading or signed out. */
-export function useProfile() {
-  const { data, isPending } = authClient.useSession()
-  const u = data?.user
-  const name = u?.name ?? ''
-  return {
-    isPending,
-    user: u
-      ? {
-          id: u.id,
-          name,
-          username: (u as { username?: string | null }).username ?? name,
-          email: u.email,
-          isAdmin: u.role === 'admin',
-          initials: name.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?',
-        }
-      : null,
+export interface Profile {
+  id: string
+  name: string
+  username: string
+  email: string
+  isAdmin: boolean
+  initials: string
+}
+
+/**
+ * The last signed-in person, remembered on this device (no secrets: name, email, role). It lets the app open at once
+ * from what this device has, without waiting for the server, and keeps working when there is no connection. The
+ * server still decides: when it says nobody is signed in, this is forgotten and the person goes to the sign-in page.
+ * The key starts with the cache prefix, so signing out clears it with the rest.
+ */
+const PROFILE_KEY = 'timedesk:cache:profile'
+let rememberedRaw: string | null | undefined
+function readProfile(): Profile | null {
+  try {
+    if (rememberedRaw === undefined) rememberedRaw = localStorage.getItem(PROFILE_KEY)
+    return rememberedRaw ? (JSON.parse(rememberedRaw) as Profile) : null
+  } catch {
+    return null
   }
+}
+function rememberProfile(p: Profile | null) {
+  const raw = p ? JSON.stringify(p) : null
+  if (raw === rememberedRaw) return
+  rememberedRaw = raw
+  try {
+    if (raw) localStorage.setItem(PROFILE_KEY, raw)
+    else localStorage.removeItem(PROFILE_KEY)
+  } catch {
+    // storage blocked: the app still works, it just waits for the server on the next visit
+  }
+}
+/** Forget the remembered person (sign out, account deleted). */
+export const forgetProfile = () => rememberProfile(null)
+
+/**
+ * The signed-in person, shaped for the UI. `null` while loading or signed out. `offline` is true when the server could
+ * not be reached and the person shown is the one this device remembers.
+ */
+export function useProfile(): { isPending: boolean; user: Profile | null; offline: boolean } {
+  const { data, isPending, error } = authClient.useSession()
+  const u = data?.user
+  if (u) {
+    const name = u.name ?? ''
+    const user: Profile = {
+      id: u.id,
+      name,
+      username: (u as { username?: string | null }).username ?? name,
+      email: u.email,
+      isAdmin: u.role === 'admin',
+      initials: name.split(/s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?',
+    }
+    rememberProfile(user)
+    return { isPending: false, user, offline: false }
+  }
+  // While the server is asked (it may be waking up) or cannot be reached, use the person this device remembers.
+  const remembered = readProfile()
+  const unreachable = !!error && (error as { status?: number }).status !== 401
+  if (remembered && (isPending || unreachable)) return { isPending: false, user: remembered, offline: unreachable }
+  // The server answered: nobody is signed in.
+  if (!isPending && !error && remembered) rememberProfile(null)
+  return { isPending, user: null, offline: unreachable }
 }

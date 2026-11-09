@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { schema, type Db } from '@timedesk/db'
 
 const s = schema.userSettings
@@ -14,15 +14,18 @@ export function createSettingsService(db: Db) {
       return { data: row?.data ?? {}, updatedAt: row?.updatedAt ?? null }
     },
 
+    /**
+     * Merges the given groups into what is stored, in one statement (jsonb ||), so two changes arriving together
+     * cannot erase each other the way read, merge, write could. A group that is sent replaces that whole group.
+     */
     async merge(userId: string, patch: Record<string, unknown>) {
-      const current = (await this.get(userId)).data
-      const data = { ...current, ...patch }
       const now = new Date()
-      await db
+      const [row] = await db
         .insert(s)
-        .values({ userId, data, updatedAt: now })
-        .onConflictDoUpdate({ target: s.userId, set: { data, updatedAt: now } })
-      return { data, updatedAt: now }
+        .values({ userId, data: patch, updatedAt: now })
+        .onConflictDoUpdate({ target: s.userId, set: { data: sql`${s.data} || excluded.data`, updatedAt: now } })
+        .returning({ data: s.data, updatedAt: s.updatedAt })
+      return { data: row.data, updatedAt: row.updatedAt }
     },
   }
 }

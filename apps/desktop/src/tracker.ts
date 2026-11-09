@@ -37,6 +37,7 @@ export function createTracker(opts: TrackerOptions) {
   const maxBuffered = opts.maxBuffered ?? 2000
 
   let current: { app: string; title: string; startedAt: number; seconds: number } | null = null
+  let paused = false
   const done: ActivitySample[] = []
 
   function close() {
@@ -49,17 +50,29 @@ export function createTracker(opts: TrackerOptions) {
 
   return {
     async tick() {
-      if (opts.getIdleSeconds() >= idleLimit) return close()
+      if (paused || opts.getIdleSeconds() >= idleLimit) return close()
       const win = await opts.getWindow().catch(() => null)
-      if (!win || !win.app) return close()
+      if (paused || !win || !win.app) return close()
 
+      // Compared the way it is stored (cut to length), or a very long name would open a new slice on every tick.
+      const app = win.app.slice(0, 120)
       const title = opts.appsOnly?.() ? '' : win.title.slice(0, 300)
-      if (current && current.app === win.app && current.title === title) {
+      if (current && current.app === app && current.title === title) {
         current.seconds += step
         return
       }
       close()
-      current = { app: win.app.slice(0, 120), title, startedAt: now() - step * 1000, seconds: step }
+      current = { app, title, startedAt: now() - step * 1000, seconds: step }
+    },
+
+    /** The computer is going to sleep or locking: finish the open slice so none spans the time away, and record nothing until resume(). */
+    pause() {
+      paused = true
+      close()
+    },
+
+    resume() {
+      paused = false
     },
 
     /** Finished slices, plus the one in progress, and forget them. Call before uploading. */

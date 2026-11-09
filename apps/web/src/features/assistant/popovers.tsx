@@ -9,7 +9,27 @@ import { TOOL_LABELS } from './tool-labels'
 export function MemoryPopover() {
   const { memoryEnabled } = useAi()
   const [items, setItems] = useState<MemoryItem[] | null>(null)
-  const load = () => listMemories().then(setItems).catch(() => setItems([]))
+  const [error, setError] = useState('')
+  const [forgetting, setForgetting] = useState<string | null>(null)
+  const load = () => {
+    setError('')
+    // On failure keep the old list (or the loading line): an empty list would say nothing is remembered.
+    return listMemories()
+      .then(setItems)
+      .catch(() => setError('Could not load what it remembers.'))
+  }
+  async function forget(id: string) {
+    setForgetting(id)
+    setError('')
+    try {
+      await forgetMemory(id)
+      setItems((list) => list?.filter((m) => m.id !== id) ?? null)
+    } catch {
+      setError('Could not forget that. Try again.')
+    } finally {
+      setForgetting(null)
+    }
+  }
   return (
     <Popover onOpenChange={(open) => open && void load()}>
       <PopoverTrigger render={<Button size="sm" variant="ghost" />}>
@@ -22,7 +42,7 @@ export function MemoryPopover() {
         {!memoryEnabled ? (
           <p className="text-muted-foreground text-sm">Memory needs an OpenAI API key (used for embeddings). Add one in Settings, AI assistant.</p>
         ) : items === null ? (
-          <p className="text-muted-foreground text-sm">Loading...</p>
+          !error && <p className="text-muted-foreground text-sm">Loading...</p>
         ) : items.length === 0 ? (
           <p className="text-muted-foreground text-sm">Nothing yet. Tell {ASSISTANT_NAME} things like "I work 9 to 5" and it will remember.</p>
         ) : (
@@ -30,12 +50,17 @@ export function MemoryPopover() {
             {items.map((m) => (
               <li key={m.id} className="flex items-start justify-between gap-2">
                 <span>{m.text}</span>
-                <Button size="xs" variant="ghost" onClick={async () => { await forgetMemory(m.id); await load() }}>
+                <Button size="xs" variant="ghost" disabled={forgetting === m.id} onClick={() => void forget(m.id)}>
                   Forget
                 </Button>
               </li>
             ))}
           </ul>
+        )}
+        {memoryEnabled && error && (
+          <p role="alert" className="text-destructive text-sm">
+            {error}
+          </p>
         )}
       </PopoverContent>
     </Popover>

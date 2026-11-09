@@ -29,8 +29,13 @@ export const DUE_BUCKET_LABEL: Record<DueBucket, string> = {
 
 /** Which due-date category a task falls in. "This week" = the next 2 to 7 days. */
 export function dueBucket(due: string | null, now: number): DueBucket {
+  return dueBucketOn(due, toDateKey(now))
+}
+
+/** Like dueBucket, for a given "today" (YYYY-MM-DD). The server uses it with the user's own date, not its clock's. */
+export function dueBucketOn(due: string | null, today: string): DueBucket {
   if (!due) return 'none'
-  const days = daysUntil(due, now)
+  const days = dayNumber(due) - dayNumber(today)
   if (days < 0) return 'overdue'
   if (days === 0) return 'today'
   if (days === 1) return 'tomorrow'
@@ -38,14 +43,20 @@ export function dueBucket(due: string | null, now: number): DueBucket {
   return 'later'
 }
 
-/** The next due date (YYYY-MM-DD) after `due` for a recurring task. */
+/**
+ * The next due date (YYYY-MM-DD) after `due` for a recurring task. Monthly keeps the day number, but never runs
+ * past the end of the next month: 31 Jan becomes 28 (or 29) Feb, not 3 Mar. Works in UTC, so no clock change can shift it.
+ */
 export function nextDue(due: string, r: Recurrence): string {
   const [y, m, d] = due.split('-').map(Number)
-  const next =
-    r.freq === 'monthly'
-      ? new Date(y, m, d)
-      : new Date(y, m - 1, d + (r.freq === 'daily' ? 1 : r.freq === 'weekly' ? 7 : Math.max(1, r.every ?? 1)))
-  return toDateKey(next.getTime())
+  let next: Date
+  if (r.freq === 'monthly') {
+    const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate() // m is 1-based, so month index m is the next month
+    next = new Date(Date.UTC(y, m, Math.min(d, lastDay)))
+  } else {
+    next = new Date(Date.UTC(y, m - 1, d + (r.freq === 'daily' ? 1 : r.freq === 'weekly' ? 7 : Math.max(1, r.every ?? 1))))
+  }
+  return next.toISOString().slice(0, 10)
 }
 
 export function describeRecurrence(r: Recurrence): string {

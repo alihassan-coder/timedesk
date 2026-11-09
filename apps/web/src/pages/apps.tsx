@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { ChevronLeft, ChevronRight, Search, Trash2, X } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { api, ApiError } from '@/lib/api'
 import { isDesktop } from '@/lib/desktop'
+import { cn } from '@/lib/utils'
 
 interface Summary {
   totalSeconds: number
@@ -69,7 +70,14 @@ export default function AppsPage() {
   const [pageSize, setPageSize] = useState('10')
   const [summary, setSummary] = useState<Summary | null>(null)
   const [sessions, setSessions] = useState<Sessions | null>(null)
-  const [error, setError] = useState('')
+  const [summaryError, setSummaryError] = useState('')
+  const [sessionsError, setSessionsError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [loadingSessions, setLoadingSessions] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [erasing, setErasing] = useState(false)
+  // Bumped after a delete so both the totals and the list load again.
+  const [version, setVersion] = useState(0)
 
   const b = bounds(range, from, to)
   const rangeKey = b ? `${b.from}|${b.to ?? ''}` : ''
@@ -81,44 +89,59 @@ export default function AppsPage() {
     return () => clearTimeout(t)
   }, [search])
 
-  const reload = useCallback(
-    async (isCurrent: () => boolean = () => true) => {
-      if (!b) {
-        setSummary({ totalSeconds: 0, byApp: [] })
-        setSessions({ items: [], total: 0, page: 1, pageSize: Number(pageSize), pages: 1 })
-        return
-      }
-      try {
-        const [s, list] = await Promise.all([
-          api<Summary>(`/activity/summary?${query(b)}`),
-          api<Sessions>(
-            `/activity/sessions?${query(b, { page: String(page), pageSize, ...(app !== 'all' ? { app } : {}), ...(debounced ? { q: debounced } : {}) })}`,
-          ),
-        ])
-        if (!isCurrent()) return
-        setSummary(s)
-        setSessions(list)
-        setError('')
-        // The last page vanished (for example after deleting): go back one.
-        if (list.page > list.pages) setPage(list.pages)
-      } catch (e) {
-        if (!isCurrent()) return
-        setError(e instanceof ApiError ? e.message : 'Could not load activity.')
-        setSummary((s) => s ?? { totalSeconds: 0, byApp: [] })
-        setSessions((s) => s ?? { items: [], total: 0, page: 1, pageSize: Number(pageSize), pages: 1 })
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `b` is derived from rangeKey
-    [rangeKey, page, pageSize, app, debounced],
-  )
-
+  // The totals depend only on the range, so paging and filtering do not fetch them again.
   useEffect(() => {
+    if (!b) {
+      setSummary({ totalSeconds: 0, byApp: [] })
+      return
+    }
     let current = true
-    void reload(() => current)
+    api<Summary>(`/activity/summary?${query(b)}`)
+      .then((s) => {
+        if (!current) return
+        setSummary(s)
+        setSummaryError('')
+      })
+      .catch((e: unknown) => {
+        if (!current) return
+        setSummaryError(e instanceof ApiError ? e.message : 'Could not load activity.')
+        setSummary((s) => s ?? { totalSeconds: 0, byApp: [] })
+      })
     return () => {
       current = false
     }
-  }, [reload])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `b` is derived from rangeKey
+  }, [rangeKey, version])
+
+  useEffect(() => {
+    if (!b) {
+      setSessions({ items: [], total: 0, page: 1, pageSize: Number(pageSize), pages: 1 })
+      return
+    }
+    let current = true
+    // The rows already shown stay (dimmed) until the next page arrives.
+    setLoadingSessions(true)
+    api<Sessions>(`/activity/sessions?${query(b, { page: String(page), pageSize, ...(app !== 'all' ? { app } : {}), ...(debounced ? { q: debounced } : {}) })}`)
+      .then((list) => {
+        if (!current) return
+        setSessions(list)
+        setSessionsError('')
+        // The last page vanished (for example after deleting): go back one.
+        if (list.page > list.pages) setPage(list.pages)
+      })
+      .catch((e: unknown) => {
+        if (!current) return
+        setSessionsError(e instanceof ApiError ? e.message : 'Could not load activity.')
+        setSessions((s) => s ?? { items: [], total: 0, page: 1, pageSize: Number(pageSize), pages: 1 })
+      })
+      .finally(() => {
+        if (current) setLoadingSessions(false)
+      })
+    return () => {
+      current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `b` is derived from rangeKey
+  }, [rangeKey, page, pageSize, app, debounced, version])
 
   const changeRange = (r: Range) => {
     setRange(r)
@@ -126,9 +149,39 @@ export default function AppsPage() {
     setPage(1)
   }
 
+  async function eraseAll() {
+    if (!window.confirm('Erase everything the desktop app recorded about you? This cannot be undone.')) return
+    setErasing(true)
+    setActionError('')
+    try {
+      await api('/activity', { method: 'DELETE' })
+      setPage(1)
+      setApp('all')
+      setVersion((v) => v + 1)
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : 'Could not erase your activity. Check your connection and try again.')
+    } finally {
+      setErasing(false)
+    }
+  }
+
+  async function removeSession(id: string) {
+    setDeleting(id)
+    setActionError('')
+    try {
+      await api(`/activity/${id}`, { method: 'DELETE' })
+      setVersion((v) => v + 1)
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : 'Could not delete that session. Check your connection and try again.')
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  const error = actionError || summaryError || sessionsError
   const noData = summary !== null && summary.byApp.length === 0
   const filtering = app !== 'all' || debounced !== ''
-  const rows = (summary?.byApp ?? []).map((r) => ({ name: r.app, minutes: Math.round(r.seconds / 6) / 10 }))
+  const rows = useMemo(() => (summary?.byApp ?? []).map((r) => ({ name: r.app, minutes: Math.round(r.seconds / 6) / 10 })), [summary])
   const firstShown = sessions && sessions.total > 0 ? (sessions.page - 1) * sessions.pageSize + 1 : 0
   const lastShown = sessions ? Math.min(sessions.total, sessions.page * sessions.pageSize) : 0
 
@@ -211,16 +264,7 @@ export default function AppsPage() {
                 <CardDescription>Only you can see window titles. Admins and teammates cannot.</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button
-                  variant="outline"
-                  onClick={async () => {
-                    if (!window.confirm('Erase everything the desktop app recorded about you? This cannot be undone.')) return
-                    await api('/activity', { method: 'DELETE' })
-                    setPage(1)
-                    setApp('all')
-                    await reload()
-                  }}
-                >
+                <Button variant="outline" disabled={erasing} onClick={() => void eraseAll()}>
                   <Trash2 /> Erase my activity
                 </Button>
               </CardContent>
@@ -278,7 +322,7 @@ export default function AppsPage() {
             )}
           </div>
 
-          <div className="rounded-lg border">
+          <div className={cn('rounded-lg border transition-opacity', loadingSessions && 'opacity-60')} aria-busy={loadingSessions}>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -305,10 +349,8 @@ export default function AppsPage() {
                         size="icon-sm"
                         variant="ghost"
                         aria-label={`Delete this ${r.app} session`}
-                        onClick={async () => {
-                          await api(`/activity/${r.id}`, { method: 'DELETE' }).catch(() => undefined)
-                          await reload()
-                        }}
+                        disabled={deleting === r.id}
+                        onClick={() => void removeSession(r.id)}
                       >
                         <Trash2 />
                       </Button>

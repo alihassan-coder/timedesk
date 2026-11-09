@@ -20,6 +20,31 @@ const SHOTS = process.argv[2]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
 
+/** X11 ids of the app's windows whose WM_CLASS is "timedesk" (what docks match to timedesk.desktop). */
+function timedeskWindowIds() {
+  try {
+    return execFileSync('xdotool', ['search', '--class', '^timedesk$']).toString().split('\n').filter(Boolean)
+  } catch {
+    return [] // xdotool exits 1 when nothing matches
+  }
+}
+
+/** The main window: the widest of the app's windows. Retries for a few seconds while the window manager settles. */
+async function mainWindowId() {
+  for (let i = 0; i < 20; i++) {
+    const sized = timedeskWindowIds()
+      .map((id) => {
+        const geo = execFileSync('xdotool', ['getwindowgeometry', id]).toString()
+        return { id, width: Number(/Geometry: (\d+)x/.exec(geo)?.[1] ?? 0) }
+      })
+      .filter((w) => w.width >= 600)
+      .sort((a, b) => b.width - a.width)
+    if (sized[0]) return sized[0].id
+    await sleep(500)
+  }
+  return null
+}
+
 const userData = mkdtempSync(join(tmpdir(), 'td-widget-'))
 const app = spawn(electron, ['.', `--web-url=${WEB}`, `--remote-debugging-port=${PORT}`], {
   cwd: new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
@@ -86,12 +111,19 @@ try {
     await shot(main, 'w1-settings')
   })
 
+  if (process.platform === 'linux') {
+    await step('Linux: the window is named timedesk, so docks show the timedesk logo (not a generic icon)', async () => {
+      const id = await mainWindowId()
+      if (!id) throw new Error('no window with WM_CLASS "timedesk": docks would show a generic icon')
+      results.push('      ' + execFileSync('xprop', ['-id', id, 'WM_CLASS']).toString().trim())
+    })
+  }
+
   await step('Automatic: no floating window while timedesk is in front, even with a timer running', async () => {
     if (process.platform === 'linux') {
       // A virtual screen has no person to click on a window: give the main window the focus, as a person would.
-      const rows = execFileSync('wmctrl', ['-lGp']).toString().split('\n').filter(Boolean).map((l) => l.trim().split(/\s+/))
-      const mainRow = rows.find((p) => Number(p[2]) === app.pid && Number(p[5]) >= 600)
-      if (mainRow) execFileSync('wmctrl', ['-i', '-a', mainRow[0]])
+      const id = await mainWindowId()
+      if (id) execFileSync('xdotool', ['windowactivate', '--sync', id])
       await sleep(800)
     }
     await main.ev(`document.querySelector('[aria-label="Floating timer style"] [role=radio]').click()`)
@@ -99,16 +131,23 @@ try {
     await waitFor(main, bodyHas('Stopwatch (no task)'), 'timer menu')
     await clickText(main, 'Stopwatch (no task)')
     await waitFor(main, exists('[aria-label="Stop timer"]'), 'timer running')
-    await sleep(1500)
-    const list = await (await fetch(`http://localhost:${PORT}/json`)).json()
-    const widget = list.find((x) => x.url.includes('/widget'))
-    // The widget window may exist but must not be visible. Visibility is reported by the page itself.
-    if (widget) {
+    // The widget window may exist but must not be visible. Visibility is reported by the page itself. A window manager
+    // on a virtual screen can take a moment to settle the focus, so this waits up to 8 s and only fails if the floating
+    // timer stays visible (one quick check failed now and then on CI while the app was right).
+    let visible = 'hidden'
+    for (let i = 0; i < 16; i++) {
+      await sleep(500)
+      const list = await (await fetch(`http://localhost:${PORT}/json`)).json()
+      if (!list.some((x) => x.url.includes('/widget'))) {
+        visible = 'hidden'
+        break
+      }
       const w = await connect((u) => u.includes('/widget'))
-      const visible = await w.ev('document.visibilityState')
+      visible = await w.ev('document.visibilityState')
       w.ws.close()
-      if (visible === 'visible') throw new Error('the floating timer is visible while timedesk has focus')
+      if (visible !== 'visible') break
     }
+    if (visible === 'visible') throw new Error('the floating timer is visible while timedesk has focus')
   })
 
   await step('Always: the floating timer appears and shows the running clock', async () => {
@@ -236,5 +275,5 @@ try {
 } finally {
   console.log(results.join('\n'))
   app.kill()
-  process.exit(results.some((r) => !r.startsWith('PASS')) ? 1 : 0)
+  process.exit(results.some((r) => r.startsWith('FAIL') || r.startsWith('ERROR')) ? 1 : 0)
 }

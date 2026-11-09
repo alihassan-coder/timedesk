@@ -1,3 +1,5 @@
+import { DEFAULT_FOCUS_APPS, DEFAULT_FOCUS_NUDGE_SECONDS, DEFAULT_FOCUS_SITES, type FocusSession, type FocusState } from './focus.ts'
+
 /**
  * The contract between the web app and the desktop app. The desktop app exposes it as `window.timedesk`
  * inside the page; in a normal browser it does not exist, so the web app checks before using it.
@@ -29,6 +31,14 @@ export interface DesktopSettings {
   shortcuts: boolean
   /** Ask what to do with the time when you come back after being away this many minutes. 0 turns it off. */
   idleMinutes: number
+  /** Focus guard: while a timer runs, nudge me when a listed app or site is in front. Off until turned on. */
+  focusGuard: boolean
+  /** Programs that count as a distraction. */
+  focusApps: string[]
+  /** Words in a browser tab title that count as a distraction. */
+  focusSites: string[]
+  /** How long a distraction may last before the nudge. */
+  focusNudgeSeconds: number
 }
 
 export type WidgetMode = 'compact' | 'expanded' | 'dock' | 'pomodoro'
@@ -42,6 +52,10 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   widgetMode: 'compact',
   shortcuts: true,
   idleMinutes: 5,
+  focusGuard: false,
+  focusApps: DEFAULT_FOCUS_APPS,
+  focusSites: DEFAULT_FOCUS_SITES,
+  focusNudgeSeconds: DEFAULT_FOCUS_NUDGE_SECONDS,
 }
 
 export interface AppInfo {
@@ -66,6 +80,8 @@ export interface TimerState {
   startedAt: number | null
   /** Show the running time in the window title. Defaults to yes. */
   showInTitle?: boolean
+  /** Pomodoro lengths in minutes, so Focus guard can rest during breaks when the Pomodoro style is chosen. */
+  pomodoro?: { focus: number; break: number }
 }
 
 export type TrayAction = 'toggle-timer'
@@ -114,4 +130,10 @@ export interface TimedeskBridge {
   onIdleDecision(cb: (d: IdleDecision) => void): () => void
   /** The quick-add window was opened (with the shortcut): clear it and focus the text box. */
   onQuickAddShown(cb: () => void): () => void
+  /** Focus guard, live: whether a session runs and whether a distraction is in front. */
+  getFocusState(): Promise<FocusState>
+  onFocusState(cb: (s: FocusState) => void): () => void
+  /** Finished focus sessions (and forget them). Put them back with requeueFocusSessions if uploading fails. */
+  pullFocusSessions(): Promise<FocusSession[]>
+  requeueFocusSessions(sessions: FocusSession[]): void
 }

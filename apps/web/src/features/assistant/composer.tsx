@@ -15,7 +15,7 @@ interface SpeechRecognitionLike {
   interimResults: boolean
   onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
   onend: (() => void) | null
-  onerror: (() => void) | null
+  onerror: ((e: { error?: string }) => void) | null
   start(): void
   stop(): void
 }
@@ -83,7 +83,14 @@ export function Composer({
       else setText((prev) => (prev ? `${prev} ${heard}` : heard))
     }
     rec.onend = () => setListening(false)
-    rec.onerror = () => setListening(false)
+    rec.onerror = (e) => {
+      setListening(false)
+      // "no-speech" and "aborted" are normal endings; anything else deserves a word.
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') setNote('Microphone access is blocked. Allow it in your browser or system settings.')
+      else if (e.error === 'audio-capture') setNote('No microphone was found.')
+      else if (e.error === 'network') setNote('Speech recognition needs an internet connection.')
+      else if (e.error && e.error !== 'no-speech' && e.error !== 'aborted') setNote('Speech recognition stopped. Try again.')
+    }
     recRef.current = rec
     rec.start()
     setListening(true)

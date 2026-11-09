@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type DesktopSettings, type IdleDecision, type TimedeskBridge, type TimerState, type TrayAction, type UpdateStatus } from './bridge.ts'
+import { IPC, type DesktopSettings, type FocusSession, type FocusState, type IdleDecision, type TimedeskBridge, type TimerState, type TrayAction, type UpdateStatus } from './bridge.ts'
 import type { ActivitySample } from './tracker.ts'
 
 /** The only thing the web page can reach. Everything goes through named, validated messages. */
@@ -45,6 +45,14 @@ const bridge: TimedeskBridge = {
     ipcRenderer.on(IPC.quickAddShown, handler)
     return () => ipcRenderer.removeListener(IPC.quickAddShown, handler)
   },
+  getFocusState: () => ipcRenderer.invoke(IPC.focusState),
+  onFocusState(cb: (s: FocusState) => void) {
+    const handler = (_: unknown, s: FocusState) => cb(s)
+    ipcRenderer.on(IPC.focusEvent, handler)
+    return () => ipcRenderer.removeListener(IPC.focusEvent, handler)
+  },
+  pullFocusSessions: () => ipcRenderer.invoke(IPC.focusPull),
+  requeueFocusSessions: (sessions: FocusSession[]) => ipcRenderer.send(IPC.focusRequeue, sessions),
   onTrayAction(cb: (action: TrayAction) => void) {
     const handler = (_: unknown, action: TrayAction) => cb(action)
     ipcRenderer.on(IPC.trayAction, handler)

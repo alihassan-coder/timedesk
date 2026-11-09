@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, X } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { Segmented } from '@/components/segmented'
@@ -24,14 +24,21 @@ export default function AdminPage() {
   const [status, setStatus] = useState<Status>('pending')
   const [members, setMembers] = useState<Member[] | null>(null)
   const [error, setError] = useState('')
+  // People whose approve or reject is on its way, so a second click cannot send it twice.
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
+  // Only the newest request may fill the table: a slow answer for the previous tab must not show up here.
+  const request = useRef(0)
 
   const load = useCallback(async (s: Status) => {
+    const mine = ++request.current
     setError('')
     try {
-      setMembers((await api<{ users: Member[] }>(`/admin/users?status=${s}`)).users)
+      const { users } = await api<{ users: Member[] }>(`/admin/users?status=${s}`)
+      if (mine === request.current) setMembers(users)
     } catch (e) {
+      if (mine !== request.current) return
       setError(e instanceof ApiError ? e.message : 'Could not load members.')
-      setMembers([])
+      setMembers((m) => m ?? [])
     }
   }, [])
 
@@ -39,12 +46,25 @@ export default function AdminPage() {
     void load(status)
   }, [status, load])
 
+  const switchTab = (s: Status) => {
+    setMembers(null) // the old tab's people must not show under the new tab's name
+    setStatus(s)
+  }
+
   async function decide(id: string, action: 'approve' | 'reject') {
+    if (busy.has(id)) return
+    setBusy((b) => new Set(b).add(id))
     try {
       await api(`/admin/users/${id}/${action}`, { method: 'POST' })
       await load(status)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Something went wrong.')
+    } finally {
+      setBusy((b) => {
+        const next = new Set(b)
+        next.delete(id)
+        return next
+      })
     }
   }
 
@@ -58,7 +78,7 @@ export default function AdminPage() {
         actions={
           <Segmented<Status>
             value={status}
-            onChange={setStatus}
+            onChange={switchTab}
             options={[
               { value: 'pending', label: 'Pending' },
               { value: 'approved', label: 'Approved' },
@@ -104,12 +124,12 @@ export default function AdminPage() {
                   ) : (
                     <div className="flex justify-end gap-2">
                       {m.status !== 'approved' && (
-                        <Button size="sm" onClick={() => decide(m.id, 'approve')}>
+                        <Button size="sm" disabled={busy.has(m.id)} onClick={() => decide(m.id, 'approve')}>
                           <Check /> Approve
                         </Button>
                       )}
                       {m.status !== 'rejected' && (
-                        <Button size="sm" variant="outline" onClick={() => decide(m.id, 'reject')}>
+                        <Button size="sm" variant="outline" disabled={busy.has(m.id)} onClick={() => decide(m.id, 'reject')}>
                           <X /> Reject
                         </Button>
                       )}

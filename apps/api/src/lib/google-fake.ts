@@ -70,6 +70,10 @@ export function createFakeGoogle() {
     async listEvents(token, _cal, q) {
       log.push('list')
       const email = who(token)
+      // Like Google: changes can only be asked for over roughly the last 20 days ("updatedMinTooLongAgo").
+      if (q.updatedMin && Date.parse(q.updatedMin) < Date.now() - 20 * 86_400_000) {
+        throw new GoogleApiError(410, 'Google Calendar answered 410 (updatedMinTooLongAgo).')
+      }
       return [...calendarOf(email).values()].filter((e) => {
         if (e.status === 'cancelled' && !q.showDeleted) return false
         if (q.timeMin && ms(e.end) <= Date.parse(q.timeMin)) return false

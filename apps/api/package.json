@@ -2,6 +2,7 @@
   "name": "@timedesk/api",
   "private": true,
   "version": "0.0.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file=.env src/dev.ts",
@@ -9,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:memory": "tsx src/dev-memory.ts",
+    "dev:google": "tsx src/dev-memory.ts --real-google",
     "build": "node scripts/build.mjs"
   },
   "dependencies": {

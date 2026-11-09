@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { UIMessage } from 'ai'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import { readCache, writeCache } from '@/lib/cache'
 
 /** Product name of the assistant. Change it here and it changes everywhere. */
@@ -17,6 +17,8 @@ export interface Conversation {
   dirty: boolean
   /** True once the server has this chat, so a missing one means it was deleted elsewhere. */
   synced: boolean
+  /** Why the messages could not be fetched (network or server trouble). Cleared when opening it again. */
+  loadError?: string
 }
 
 interface State {
@@ -61,6 +63,31 @@ export const textOf = (m: UIMessage) => m.parts.map((p) => (p.type === 'text' ? 
 const push = (c: Conversation) =>
   api(`/chats/${c.id}`, { method: 'PUT', body: { title: c.title, messages: c.messages.map((m) => ({ id: m.id, role: m.role, parts: m.parts })) } })
 
+// One upload at a time per chat. Two PUTs in flight could land out of order and leave the older messages on
+// the server, so while one runs only the latest version waits, and goes up when the first is done.
+const waiting = new Map<string, Conversation>()
+const uploading = new Map<string, Promise<void>>()
+
+function upload(c: Conversation): Promise<void> {
+  waiting.set(c.id, c)
+  const running = uploading.get(c.id)
+  if (running) return running
+  const run = (async () => {
+    for (let next = waiting.get(c.id); next; next = waiting.get(c.id)) {
+      waiting.delete(c.id)
+      try {
+        await push(next)
+        // A newer version is waiting: it is still dirty until that one is up too.
+        if (!waiting.has(c.id)) update(c.id, { dirty: false, synced: true })
+      } catch {
+        if (!waiting.has(c.id)) break // stays dirty; uploaded on the next start
+      }
+    }
+  })().finally(() => uploading.delete(c.id))
+  uploading.set(c.id, run)
+  return run
+}
+
 /**
  * Shows the cached chats at once, then reconciles with the server:
  *  - chats only the server has are added (messages load when opened)
@@ -72,7 +99,7 @@ export async function bindChats(id: string) {
   if (userId === id && state !== EMPTY) return
   userId = id
   const cached = readCache<State>('chats', id)
-  set(cached ?? EMPTY)
+  set(cached ? { ...cached, conversations: cached.conversations.map((c) => ({ ...c, loadError: undefined })) } : EMPTY)
 
   try {
     const { chats } = await api<{ chats: ServerChat[] }>('/chats')
@@ -92,10 +119,10 @@ export async function bindChats(id: string) {
     }
     set({ ...state, conversations: merged })
 
-    for (const c of merged.filter((x) => x.dirty || !x.synced)) {
-      await push(c)
-        .then(() => update(c.id, { dirty: false, synced: true }))
-        .catch(() => {})
+    for (const { id: chatId } of merged.filter((x) => x.dirty || !x.synced)) {
+      // Read it again: a save during an earlier upload may have made a newer version, and that one must win.
+      const latest = state.conversations.find((x) => x.id === chatId)
+      if (latest && (latest.dirty || !latest.synced)) await upload(latest)
     }
   } catch {
     // offline or server down: keep working from the cache
@@ -105,6 +132,7 @@ export async function bindChats(id: string) {
 export function resetChats() {
   userId = null
   state = EMPTY
+  waiting.clear()
   listeners.forEach((l) => l())
 }
 
@@ -118,18 +146,28 @@ export const chatActions = {
     set({ ...state, activeId: id })
     const chat = state.conversations.find((c) => c.id === id)
     if (!chat || chat.loaded) return
+    if (chat.loadError) update(id, { loadError: undefined })
     try {
       const { chat: full } = await api<{ chat: { messages: UIMessage[]; title: string } }>(`/chats/${id}`)
-      update(id, { messages: full.messages, title: full.title, loaded: true })
-    } catch {
-      // not on the server any more: drop it
-      set({ conversations: state.conversations.filter((c) => c.id !== id), activeId: null })
+      // Saved on this device in the meantime: the local copy is newer.
+      if (state.conversations.find((c) => c.id === id)?.loaded) return
+      update(id, { messages: full.messages, title: full.title, loaded: true, loadError: undefined })
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        // Deleted on another device: drop it, and leave the active chat alone if the person moved on.
+        set({ conversations: state.conversations.filter((c) => c.id !== id), activeId: state.activeId === id ? null : state.activeId })
+      } else {
+        // Offline or server trouble: keep the chat, opening it again retries.
+        update(id, { loaded: false, loadError: e instanceof ApiError ? e.message : 'Could not reach the server.' })
+      }
     }
   },
 
   remove(id: string) {
     set({ conversations: state.conversations.filter((c) => c.id !== id), activeId: state.activeId === id ? null : state.activeId })
-    void api(`/chats/${id}`, { method: 'DELETE' }).catch(() => {})
+    // Wait for an upload still in flight, or it would bring the chat back after the delete.
+    waiting.delete(id)
+    void (uploading.get(id) ?? Promise.resolve()).then(() => api(`/chats/${id}`, { method: 'DELETE' })).catch(() => {})
   },
 
   /** Saves (or creates) a conversation on this device at once, then on the server. */
@@ -143,9 +181,7 @@ export const chatActions = {
       conversations: existing ? state.conversations.map((c) => (c.id === id ? convo : c)) : [convo, ...state.conversations],
       activeId: id,
     })
-    void push(convo)
-      .then(() => update(id, { dirty: false, synced: true }))
-      .catch(() => {}) // stays dirty; uploaded on the next start
+    void upload(convo)
   },
 }
 

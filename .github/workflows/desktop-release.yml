@@ -54,6 +54,29 @@ jobs:
           case "$API_URL" in https://*) ;; *) echo "::error::TIMEDESK_API_URL must start with https://"; exit 1 ;; esac
 
       - run: pnpm install --frozen-lockfile
+
+      # Electron (and electron-builder) download the Electron program. GitHub's download server sometimes answers 504,
+      # so it is cached between runs and fetched up front with a few tries, instead of failing a release on one bad moment.
+      - name: Cache the Electron program
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Download Electron (with retries)
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5; do
+            node -e "require('electron')" && exit 0
+            echo "Electron download failed (try $i), waiting before the next try"
+            rm -rf node_modules/electron/dist node_modules/electron/path.txt 2>/dev/null || true
+            sleep $((i * 15))
+          done
+          exit 1
       - run: pnpm --filter @timedesk/shared test
       - run: pnpm --filter @timedesk/desktop test
       - run: pnpm --filter @timedesk/desktop typecheck

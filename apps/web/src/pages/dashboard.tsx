@@ -1,13 +1,19 @@
 import { Link } from 'react-router'
+import { CalendarRange, NotebookPen, Sparkles, Sunrise, MoonStar } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, XAxis } from 'recharts'
-import { dailyTotals, dueBucket, formatHours, overlapMs, periodStart } from '@timedesk/shared'
+import { useMemo } from 'react'
+import { dailyTotals, dueBucket, formatHours, overlapMs, periodStart, toDateKey, type TimeEntry } from '@timedesk/shared'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
+import { FocusSummaryCard } from '@/features/focus'
 import { TaskRow } from '@/features/task-row'
+import { TopTasksCard } from '@/features/top-tasks'
+import { wrappedUp } from '@/lib/wrap-up'
+import { askTempoLink, TEMPO_PROMPTS } from '@/features/assistant/tempo-prompts'
 import { useProfile } from '@/lib/auth-client'
 import { projectColor } from '@/lib/project-colors'
 
@@ -18,13 +24,33 @@ function greeting(hour: number) {
 }
 
 export default function Dashboard() {
-  const { tasks, entries, projects, ready, error } = useStore()
+  const { tasks, entries, tracked, projects, ready } = useStore()
   const { user } = useProfile()
-  const running = entries.some((e) => e.endedAt === null)
-  const now = useNow(running)
+  // The page refreshes once a minute; only the "Tracked today" figure ticks every second (see LiveToday).
+  const now = useNow(false)
+  const minute = Math.floor(now / 60_000)
 
-  const days = dailyTotals(entries, now, 14)
-  const today = days[13].ms
+  const { days, trend, byProject, pieConfig } = useMemo(() => {
+    const at = minute * 60_000
+    const days = dailyTotals(tracked, at, 14)
+    const trend = days.map((d) => ({
+      day: new Date(d.start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+      hours: Math.round((d.ms / 3_600_000) * 10) / 10,
+    }))
+    // One pass over the entries for the last 7 days, instead of one per project.
+    const from = periodStart('day', at - 6 * 86_400_000)
+    const perProject = new Map<string, number>()
+    for (const e of tracked) {
+      if (!e.projectId || (e.endedAt !== null && e.endedAt < from)) continue
+      perProject.set(e.projectId, (perProject.get(e.projectId) ?? 0) + overlapMs(e, from, at + 1, at))
+    }
+    const byProject = projects
+      .map((p) => ({ id: p.id, name: p.name, ms: perProject.get(p.id) ?? 0, fill: projectColor(p) }))
+      .filter((p) => p.ms > 0)
+    const pieConfig = Object.fromEntries(byProject.map((p) => [p.id, { label: p.name, color: p.fill }])) satisfies ChartConfig
+    return { days, trend, byProject, pieConfig }
+  }, [tracked, projects, minute])
+
   const yesterday = days[12].ms
   const week = days.slice(7).reduce((s, d) => s + d.ms, 0)
   const prevWeek = days.slice(0, 7).reduce((s, d) => s + d.ms, 0)
@@ -33,25 +59,9 @@ export default function Dashboard() {
   const overdue = open.filter((t) => dueBucket(t.due, now) === 'overdue').length
   const doneCount = tasks.filter((t) => t.status === 'done').length
 
-  const trend = days.map((d) => ({
-    day: new Date(d.start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
-    hours: Math.round((d.ms / 3_600_000) * 10) / 10,
-  }))
-
-  const from = periodStart('day', now - 6 * 86_400_000)
-  const byProject = projects
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      ms: entries.filter((e) => e.projectId === p.id).reduce((s, e) => s + overlapMs(e, from, now + 1, now), 0),
-      fill: projectColor(p),
-    }))
-    .filter((p) => p.ms > 0)
-  const pieConfig = Object.fromEntries(byProject.map((p) => [p.id, { label: p.name, color: p.fill }])) satisfies ChartConfig
-
   const delta = (a: number, b: number) => (b === 0 ? '' : `${a >= b ? '+' : '-'}${formatHours(Math.abs(a - b))} vs previous`)
   const stats = [
-    { label: 'Tracked today', value: formatHours(today), note: delta(today, yesterday) },
+    { label: 'Tracked today', value: <LiveToday tracked={tracked} yesterday={yesterday} />, note: '' },
     { label: 'Last 7 days', value: formatHours(week), note: delta(week, prevWeek) },
     { label: 'Due today', value: String(dueToday), note: `${open.length} open in total` },
     { label: 'Overdue', value: String(overdue), note: `${doneCount} completed` },
@@ -70,17 +80,16 @@ export default function Dashboard() {
         title={`${greeting(new Date(now).getHours())}${firstName ? `, ${firstName}` : ''}`}
         description={new Date(now).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         actions={
-          <Button variant="outline" render={<Link to="/tasks" />}>
-            Add task
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" render={<Link to="/wrap-up" />}>
+              <MoonStar /> Wrap up the day
+            </Button>
+            <Button variant="outline" render={<Link to="/tasks" />}>
+              Add task
+            </Button>
+          </div>
         }
       />
-
-      {error && (
-        <p role="alert" className="border-destructive/30 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-sm">
-          {error}
-        </p>
-      )}
 
       {isNew && (
         <Card>
@@ -100,6 +109,9 @@ export default function Dashboard() {
         </Card>
       )}
 
+      {!isNew && <WrapUpNudge now={now} />}
+      {!isNew && <TopTasksCard today={toDateKey(now)} />}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => (
           <Card key={s.label}>
@@ -111,6 +123,9 @@ export default function Dashboard() {
           </Card>
         ))}
       </div>
+
+      {!isNew && <TempoCard now={now} />}
+      {!isNew && <FocusSummaryCard now={now} />}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -187,5 +202,86 @@ export default function Dashboard() {
         </CardContent>
       </Card>
     </>
+  )
+}
+
+/**
+ * Tempo's three briefings, one click each. The one that fits the moment is highlighted: plan in the morning,
+ * summary in the evening, weekly review at the end of the week.
+ */
+/** "Tracked today": the one figure that changes every second while a timer runs, so only it re-renders. */
+function LiveToday({ tracked, yesterday }: { tracked: TimeEntry[]; yesterday: number }) {
+  const running = tracked.some((e) => e.endedAt === null)
+  const now = useNow(running)
+  const from = periodStart('day', now)
+  let today = 0
+  for (const e of tracked) if (e.endedAt === null || e.endedAt > from) today += overlapMs(e, from, now + 1, now)
+  return (
+    <span className="flex flex-col">
+      {formatHours(today)}
+      <span className="text-muted-foreground mt-1.5 text-xs font-normal">
+        {yesterday === 0 ? ' ' : `${today >= yesterday ? '+' : '-'}${formatHours(Math.abs(today - yesterday))} vs yesterday`}
+      </span>
+    </span>
+  )
+}
+
+/** In the evening, a gentle reminder to wrap up the day (until it is done). */
+function WrapUpNudge({ now }: { now: number }) {
+  const { user } = useProfile()
+  const hour = new Date(now).getHours()
+  if (hour < 16 || !user || wrappedUp(user.id, toDateKey(now))) return null
+  return (
+    <div className="bg-primary/5 border-primary/30 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3">
+      <MoonStar className="text-primary size-5" />
+      <p className="flex-1 text-sm">
+        <span className="font-medium">Time to wrap up?</span> Two minutes: fill in what was not tracked, move what is left, and pick tomorrow&apos;s top 3.
+      </p>
+      <Button size="sm" render={<Link to="/wrap-up" />}>
+        Wrap up the day
+      </Button>
+    </div>
+  )
+}
+
+function TempoCard({ now }: { now: number }) {
+  const d = new Date(now)
+  const weekEnd = d.getDay() === 5 || d.getDay() === 6 || d.getDay() === 0
+  const suggested = weekEnd && d.getHours() >= 14 ? 'week' : d.getHours() < 13 ? 'plan' : 'day'
+  const items = [
+    { id: 'plan', prompt: TEMPO_PROMPTS.plan, icon: Sunrise, text: 'Your most important tasks, fitted around your calendar.' },
+    { id: 'day', prompt: TEMPO_PROMPTS.day, icon: NotebookPen, text: 'What you tracked and finished today, and what is left.' },
+    { id: 'week', prompt: TEMPO_PROMPTS.week, icon: CalendarRange, text: 'Your week compared with the last one, wins and what to change.' },
+  ] as const
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Sparkles className="size-4" /> Ask Tempo
+        </CardTitle>
+        <CardDescription>Briefings written from your own tracked time, tasks and calendar.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 sm:grid-cols-3">
+        {items.map((i) => (
+          <Link
+            key={i.id}
+            to={askTempoLink(i.prompt)}
+            className={
+              'hover:bg-accent focus-visible:ring-ring flex gap-3 rounded-lg border p-3 transition-colors outline-none focus-visible:ring-2 ' +
+              (suggested === i.id ? 'border-primary/50 bg-primary/5' : '')
+            }
+          >
+            <i.icon className="text-primary mt-0.5 size-5 shrink-0" />
+            <span className="min-w-0">
+              <span className="flex items-center gap-2 text-sm font-medium">
+                {i.prompt}
+                {suggested === i.id && <span className="bg-primary text-primary-foreground rounded px-1.5 py-0.5 text-[10px] font-medium">Now</span>}
+              </span>
+              <span className="text-muted-foreground mt-0.5 block text-xs">{i.text}</span>
+            </span>
+          </Link>
+        ))}
+      </CardContent>
+    </Card>
   )
 }
