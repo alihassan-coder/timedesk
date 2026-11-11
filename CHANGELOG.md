@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
-The backend is unchanged. Update the desktop app to get the Linux fixes.
+No backend change and no database migration. The website (Archive, project cards, new buttons) updates by itself; update the desktop app to get the same there, plus the Linux fixes.
 
 ### Linux (issue #2)
 - **No window on some laptops:** on GNOME Wayland with some Intel graphics, the GPU process crashed and the app ran invisibly. Now, when the GPU crashes before the window appears, or no window is ready after 45 seconds, timedesk restarts in safe mode: native Wayland without hardware acceleration. If even that shows nothing, it quits, so clicking the icon can start it again. Safe mode lasts until the next update. `TIMEDESK_X11=1` forces the old way
