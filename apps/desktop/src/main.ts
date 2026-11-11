@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { resolveAppFile } from './app-files.ts'
 import { LINUX_WM_CLASS, linuxAutostartEntry, linuxAutostartPath, linuxDesktopEntry, linuxDesktopEntryPath, linuxIconPath } from './autostart.ts'
 import { DEFAULT_DESKTOP_SETTINGS, IPC, type AppInfo, type DesktopSettings, type TimerState, type UpdateStatus } from './bridge.ts'
-import { APP_ORIGIN, contentSecurityPolicy, isInternalUrl, isSafeExternalUrl, linuxOzonePlatform, resolveConfig } from './config.ts'
+import { APP_ORIGIN, contentSecurityPolicy, isInternalUrl, isSafeExternalUrl, linuxOzonePlatform, resolveConfig, startupRecovery, type SafeMode } from './config.ts'
 import { pomodoroPhase, type FocusSession } from '@timedesk/shared'
 import { createFocusGuard } from './focus.ts'
 import { createTracker, type ActivitySample, type ForegroundWindow } from './tracker.ts'
@@ -39,9 +39,49 @@ if (process.platform === 'linux' && process.env.APPIMAGE) app.commandLine.append
 const log = (msg: string) => console.log(`[timedesk] ${msg}`)
 
 // Wayland: always-on-top, window placement and reading the window in front only work through XWayland. Must be set before ready.
-const ozone = linuxOzonePlatform({ platform: process.platform, env: process.env, argv: process.argv })
+// After a start that showed no window, the next start is in safe mode (see startupRecovery and issue #2).
+const safeModeFile = join(app.getPath('userData'), 'display-safe-mode.json')
+const safeMode = (() => {
+  try {
+    return process.platform === 'linux' && existsSync(safeModeFile) ? (JSON.parse(readFileSync(safeModeFile, 'utf8')) as SafeMode) : null
+  } catch {
+    return null
+  }
+})()
+const ozone = linuxOzonePlatform({ platform: process.platform, env: process.env, argv: process.argv, safeMode, appVersion: app.getVersion() })
 if (ozone.force) app.commandLine.appendSwitch('ozone-platform', ozone.force)
+if (ozone.disableGpu) app.disableHardwareAcceleration()
 if (process.platform === 'linux') log(`display: ${ozone.force ?? 'default'} (${ozone.reason})`)
+const inSafeMode = ozone.disableGpu
+
+// Whether the main window has made it on screen (or is ready, when the app starts hidden in the tray).
+let windowShown = false
+let gpuCrashes = 0
+function recoverStart(event: 'gpu-crash' | 'no-window', detail: string) {
+  const action = startupRecovery({ platform: process.platform, inSafeMode, windowShown, event })
+  if (action === 'ignore') return
+  if (action === 'relaunch-safe') {
+    log(`no window yet and ${detail}: starting again in safe mode (native display, no hardware acceleration)`)
+    try {
+      mkdirSync(dirname(safeModeFile), { recursive: true })
+      writeFileSync(safeModeFile, JSON.stringify({ version: app.getVersion(), reason: event } satisfies SafeMode))
+    } catch (e) {
+      log(`could not remember safe mode: ${(e as Error).message}`)
+    }
+    app.relaunch()
+  } else {
+    log(`still no window in safe mode (${detail}): quitting so the app can be started again. Try TIMEDESK_X11=1 or TIMEDESK_WAYLAND=1.`)
+  }
+  app.exit(action === 'quit' ? 1 : 0) // exiting also frees the single-instance lock
+}
+// Chromium retries a crashed GPU process a few times, then falls back to software, which is what left no window in
+// issue #2. Two crashes before the window appeared is enough to know this start will not work.
+app.on('child-process-gone', (_e, d) => {
+  if (d.type !== 'GPU' || d.reason === 'clean-exit') return
+  gpuCrashes++
+  log(`GPU process gone (${d.reason}, exit ${d.exitCode})`)
+  if (gpuCrashes >= 2) recoverStart('gpu-crash', `the GPU process crashed ${gpuCrashes} times`)
+})
 const userFile = (name: string) => join(app.getPath('userData'), name)
 
 function readJson<T>(file: string): T | null {
@@ -257,6 +297,7 @@ function createWindow() {
   if (process.platform === 'win32') win.setAppDetails({ appId: APP_ID, appIconPath: asset('icon.ico'), appIconIndex: 0 })
   if (bounds.maximized) win.maximize()
   win.once('ready-to-show', () => {
+    windowShown = true
     if (!startHidden) win?.show()
   })
 
@@ -621,10 +662,21 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
   const tokenFile = userFile('auth-token.bin')
   let sessionToken: string | null = null // used when the system cannot encrypt (some Linux setups): lasts until the app quits
 
-  // On Linux the keyring can come up a little after the app (at login, with auto start), so a saved token that cannot be
-  // read yet is tried again for a few seconds. The file is never removed because reading it failed. Windows reads once.
+  // On Linux the keyring can come up a little after the app (at login, with auto start), so while encryption is not
+  // available yet the saved token is tried again for a few seconds, and the file is kept. A token the working keyring
+  // cannot decrypt was saved under another keyring (issue #2): it can never be read, so it is removed and the person
+  // simply signs in again (which saves a fresh one). Windows reads once.
   const tokenTries = process.platform === 'linux' ? 5 : 1
   let keyringWaited = false // wait only once per run; later reads try once
+  const saveToken = async (token: string) => {
+    if (!(await safeStorage.isAsyncEncryptionAvailable())) return
+    try {
+      mkdirSync(dirname(tokenFile), { recursive: true })
+      writeFileSync(tokenFile, await safeStorage.encryptStringAsync(token))
+    } catch (err) {
+      log('could not save the login token: ' + (err as Error).message)
+    }
+  }
   ipcMain.handle(IPC.tokenGet, async (e) => {
     if (!fromOurPage(e)) return null
     if (sessionToken) return sessionToken
@@ -632,30 +684,33 @@ function registerIpc(tray: ReturnType<typeof createTray>, updater: ReturnType<ty
     const tries = keyringWaited ? 1 : tokenTries
     for (let i = 0; i < tries; i++) {
       if (i > 0) await new Promise((r) => setTimeout(r, 1000))
-      try {
-        if (safeStorage.isEncryptionAvailable()) {
-          keyringWaited = false
-          return safeStorage.decryptString(readFileSync(tokenFile))
+      if (await safeStorage.isAsyncEncryptionAvailable()) {
+        keyringWaited = false
+        try {
+          const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(readFileSync(tokenFile))
+          if (shouldReEncrypt) void saveToken(result) // the key was rotated: store it under the new one
+          return result
+        } catch (err) {
+          const backend = process.platform === 'linux' ? ` (keyring: ${safeStorage.getSelectedStorageBackend()})` : ''
+          log(`the saved login was made with another keyring and cannot be read${backend}; removing it, sign in again: ${(err as Error).message}`)
+          try {
+            unlinkSync(tokenFile)
+          } catch {
+            // already gone
+          }
+          return null
         }
-      } catch (err) {
-        if (i === tries - 1) log(`could not read the saved login: ${(err as Error).message}`)
       }
       if (sessionToken) return sessionToken // signed in meanwhile
     }
+    log('the keyring is not available, so the saved login cannot be read yet')
     keyringWaited = true
     return null
   })
-  ipcMain.handle(IPC.tokenSet, (e, token: unknown) => {
+  ipcMain.handle(IPC.tokenSet, async (e, token: unknown) => {
     if (!fromOurPage(e) || !isStr(token, 4000) || token.length < 8) return
     sessionToken = token
-    if (safeStorage.isEncryptionAvailable()) {
-      try {
-        mkdirSync(dirname(tokenFile), { recursive: true })
-        writeFileSync(tokenFile, safeStorage.encryptString(token))
-      } catch (err) {
-        log('could not save the login token: ' + (err as Error).message)
-      }
-    }
+    await saveToken(token)
   })
   ipcMain.handle(IPC.tokenClear, (e) => {
     if (!fromOurPage(e)) return
@@ -821,6 +876,8 @@ if (!app.requestSingleInstanceLock()) {
     applyAutoStart()
     integrateLinuxAppImage()
     createWindow()
+    // A window that is not ready after 45 s will not come: recover instead of running invisibly (Linux only).
+    setTimeout(() => recoverStart('no-window', 'the window was not ready after 45 s'), 45_000).unref()
     applyShortcuts()
     startTimers()
     watchPower()

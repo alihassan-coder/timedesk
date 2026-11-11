@@ -28,7 +28,14 @@ module.exports = {
   productName: 'timedesk',
   copyright: 'Copyright (c) timedesk',
   directories: { output: 'release', buildResources: 'build' },
-  files: ['dist/**', 'package.json'],
+  files: [
+    'dist/**',
+    'package.json',
+    // active-win has native code for Windows only; on Linux it runs xprop. Its install step still compiles an EMPTY Linux
+    // binding, and loading that fails ("Module did not self-register"), which took app tracking down on Linux (issue #2).
+    // Without the file, active-win skips it (it checks the file exists) and uses xprop as intended.
+    '!node_modules/active-win/lib/binding/napi-*-linux-*{,/**}',
+  ],
   asarUnpack: ['node_modules/active-win/**'],
 
   win: {
@@ -67,7 +74,8 @@ module.exports = {
 
   // File names are fixed here (not derived from the package name) so they match what the updater metadata points to.
   appImage: { artifactName: 'timedesk-${version}.${ext}' },
-  deb: { packageName: 'timedesk', artifactName: 'timedesk_${version}_${arch}.${ext}' },
+  // App tracking on Linux reads the window in front with xprop and xwininfo (package x11-utils).
+  deb: { packageName: 'timedesk', artifactName: 'timedesk_${version}_${arch}.${ext}', recommends: ['x11-utils'] },
 
   publish: { provider: 'github', owner: 'alihassan-coder', repo: 'timedesk' },
 }

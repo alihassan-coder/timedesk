@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { daysUntil, describeRecurrence, dueBucket, nextDue, toDateKey } from '../src/index.ts'
+import { ARCHIVE_AFTER_DAYS, archiveByWeek, daysUntil, describeRecurrence, dueBucket, isArchived, nextDue, splitArchived, startOfWeek, toDateKey, type Task } from '../src/index.ts'
 
 // Wednesday 4 Nov 2026, 15:00 local time. Using the Date constructor keeps this timezone-independent.
 const NOW = new Date(2026, 10, 4, 15, 0).getTime()
@@ -56,5 +56,41 @@ describe('recurring tasks', () => {
 describe('date keys', () => {
   it('formats with zero padding', () => {
     expect(toDateKey(new Date(2026, 0, 5, 9).getTime())).toBe('2026-01-05')
+  })
+})
+
+describe('archive: finished tasks leave the board after a week', () => {
+  const DAY = 86_400_000
+  const task = (id: string, extra: Partial<Task> = {}): Task => ({ id, title: id, projectId: null, status: 'todo', priority: 'medium', due: null, recurrence: null, createdAt: NOW - 30 * DAY, completedAt: null, ...extra })
+  const done = (id: string, daysAgo: number | null, extra: Partial<Task> = {}) => task(id, { status: 'done', completedAt: daysAgo === null ? null : NOW - daysAgo * DAY, ...extra })
+
+  it('a task finished less than 7 days ago stays; from 7 days on it is archived', () => {
+    expect(ARCHIVE_AFTER_DAYS).toBe(7)
+    expect(isArchived(done('a', 6.9), NOW)).toBe(false)
+    expect(isArchived(done('b', 7), NOW)).toBe(true)
+    expect(isArchived(done('c', 40), NOW)).toBe(true)
+  })
+
+  it('open tasks are never archived, however old', () => {
+    expect(isArchived(task('open', { createdAt: NOW - 400 * DAY }), NOW)).toBe(false)
+    expect(isArchived(task('busy', { status: 'in_progress' }), NOW)).toBe(false)
+  })
+
+  it('finished before finish times were saved (no time): archived', () => {
+    expect(isArchived(done('old', null), NOW)).toBe(true)
+  })
+
+  it('finished copies of a repeating task archive too; the next one stays open', () => {
+    const list = [done('post-1', 14, { recurrence: { freq: 'weekly' } }), task('post-2', { recurrence: { freq: 'weekly' } })]
+    const { active, archived } = splitArchived(list, NOW)
+    expect(active.map((t) => t.id)).toEqual(['post-2'])
+    expect(archived.map((t) => t.id)).toEqual(['post-1'])
+  })
+
+  it('archive groups by the week the task was finished, newest week first, newest task first', () => {
+    const groups = archiveByWeek([done('a', 8), done('b', 20), done('c', 9), done('d', null)])
+    expect(groups.map((g) => g.tasks.map((t) => t.id))).toEqual([['a', 'c'], ['b'], ['d']])
+    expect(groups[0].weekStart).toBe(startOfWeek(toDateKey(NOW - 8 * DAY)))
+    expect(groups.at(-1)!.weekStart).toBeNull() // no finish time: "Earlier"
   })
 })

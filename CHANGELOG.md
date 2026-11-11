@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+The backend is unchanged. Update the desktop app to get the Linux fixes.
+
+### Linux (issue #2)
+- **No window on some laptops:** on GNOME Wayland with some Intel graphics, the GPU process crashed and the app ran invisibly. Now, when the GPU crashes before the window appears, or no window is ready after 45 seconds, timedesk restarts in safe mode: native Wayland without hardware acceleration. If even that shows nothing, it quits, so clicking the icon can start it again. Safe mode lasts until the next update. `TIMEDESK_X11=1` forces the old way
+- **App tracking works in the installed app:** the package no longer ships an empty native file that stopped the tracker from loading. The release build now checks this. The `.deb` recommends `x11-utils` (xprop), which tracking uses
+- **A saved login from another keyring** is removed with a clear message, and you sign in again, instead of failing quietly every start. Uses Electron's new async keyring calls (no more deprecation warnings)
+
+### Archive
+- Finished tasks leave the Board and List 7 days after you finish them and move to the new **Archive** view on the Tasks page. It is grouped by the week you finished them, and search and the project filter work there too. Nothing is deleted: reports, wrap-up and weekly review still count them. **Reopen** brings a task back to To do
+- Finished copies of a repeating task archive too; the next one is always waiting in To do
+- The Board and List say how many tasks are in the Archive, with a link to it
+
+### Projects
+- Cards in a row line up: the footer always sits at the bottom
+- Long descriptions show two lines, with Show more and Show less
+- Each card uses its project's colour for the progress bar. While a timer runs on the project, the card shows a ring, a live clock and a Stop button, and it shows how many tasks are open
+
+### Buttons
+- Main buttons are glossy pills in your accent colour, and outline buttons are soft raised pills. On hover a soft light passes over the button, it lifts slightly and its icon grows; a press sinks it. No motion if your system asks for less
+
+### Website
+- The desktop download links and the sidebar show the current desktop version (they said 0.3.1 after 0.4.0 was out). The version now comes from the desktop app itself
+
 ## 0.4.0
 
 Needs the backend update and database migrations `0004_reviews_and_completed` to `0007_top_tasks` (`pnpm --filter @timedesk/db db:migrate`, run before the API goes live). Update the desktop app to get the focus guard, multitasking widget and the Linux icon fix.

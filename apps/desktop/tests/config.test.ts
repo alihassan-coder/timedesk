@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { APP_START_URL, contentSecurityPolicy, DEV_WEB_URL, isInternalUrl, isSafeExternalUrl, linuxOzonePlatform, resolveConfig } from '../src/config.ts'
+import { APP_START_URL, contentSecurityPolicy, DEV_WEB_URL, isInternalUrl, isSafeExternalUrl, linuxOzonePlatform, resolveConfig, startupRecovery } from '../src/config.ts'
 
 describe('which interface the app opens', () => {
   const base = { argv: [] as string[], env: {} as Record<string, string | undefined>, hasBundledUi: true }
@@ -91,5 +91,44 @@ describe('Linux display server', () => {
     expect(linuxOzonePlatform({ ...wayland, env: { ...wayland.env, TIMEDESK_WAYLAND: '1' } }).force).toBeNull()
     expect(linuxOzonePlatform({ ...wayland, argv: ['--ozone-platform=wayland'] }).force).toBeNull()
     expect(linuxOzonePlatform({ ...wayland, env: { ...wayland.env, ELECTRON_OZONE_PLATFORM_HINT: 'auto' } }).force).toBeNull()
+  })
+
+  // Issue #2: on some Intel GPUs under GNOME Wayland the GPU process crashes through XWayland and no window ever appears.
+  // After that happened once, the app starts in safe mode: native Wayland without hardware acceleration.
+  const safe = { version: '0.4.1', reason: 'gpu' }
+  it('after a failed start, uses native Wayland without the GPU', () => {
+    const r = linuxOzonePlatform({ ...wayland, safeMode: safe, appVersion: '0.4.1' })
+    expect(r).toMatchObject({ force: 'wayland', disableGpu: true })
+    expect(r.reason).toMatch(/safe mode/)
+  })
+  it('on an X11 session, safe mode only turns the GPU off', () => {
+    expect(linuxOzonePlatform({ ...wayland, env: { XDG_SESSION_TYPE: 'x11' }, safeMode: safe, appVersion: '0.4.1' })).toMatchObject({ force: null, disableGpu: true })
+  })
+  it('an update tries the normal way again (the new version may have fixed it)', () => {
+    expect(linuxOzonePlatform({ ...wayland, safeMode: safe, appVersion: '0.5.0' })).toMatchObject({ force: 'x11', disableGpu: false })
+  })
+  it('TIMEDESK_X11=1 forces XWayland even in safe mode', () => {
+    expect(linuxOzonePlatform({ ...wayland, env: { ...wayland.env, TIMEDESK_X11: '1' }, safeMode: safe, appVersion: '0.4.1' })).toMatchObject({ force: 'x11', disableGpu: false })
+  })
+  it('normally keeps the GPU on', () => {
+    expect(linuxOzonePlatform(wayland).disableGpu).toBe(false)
+  })
+})
+
+describe('recovering from a start that shows no window (Linux)', () => {
+  const base = { platform: 'linux', inSafeMode: false, windowShown: false }
+  it('a GPU crash before the window appeared switches to safe mode', () => {
+    expect(startupRecovery({ ...base, event: 'gpu-crash' })).toBe('relaunch-safe')
+  })
+  it('a window that never appears switches to safe mode', () => {
+    expect(startupRecovery({ ...base, event: 'no-window' })).toBe('relaunch-safe')
+  })
+  it('already in safe mode and still no window: quit, so the next click on the icon can start it again', () => {
+    expect(startupRecovery({ ...base, inSafeMode: true, event: 'no-window' })).toBe('quit')
+    expect(startupRecovery({ ...base, inSafeMode: true, event: 'gpu-crash' })).toBe('ignore') // Chromium restarts the GPU process itself
+  })
+  it('once the window is on screen, a GPU crash is left to Chromium, and other systems are never touched', () => {
+    expect(startupRecovery({ ...base, windowShown: true, event: 'gpu-crash' })).toBe('ignore')
+    expect(startupRecovery({ ...base, platform: 'win32', event: 'no-window' })).toBe('ignore')
   })
 })

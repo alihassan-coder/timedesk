@@ -1,12 +1,15 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import { Calendar, CalendarDays, CalendarRange, ChevronLeft, ChevronRight, KanbanSquare, List, Plus, Repeat } from 'lucide-react'
+import { Archive, Calendar, CalendarDays, CalendarRange, ChevronLeft, ChevronRight, KanbanSquare, List, Plus, Repeat, RotateCcw } from 'lucide-react'
 import {
+  ARCHIVE_AFTER_DAYS,
   DUE_BUCKET_LABEL,
   DUE_BUCKET_ORDER,
   addDays,
   addMonths,
+  archiveByWeek,
   dueBucketOn,
   monthGrid,
+  splitArchived,
   startOfWeek,
   toDateKey,
   type DueBucket,
@@ -34,9 +37,9 @@ import { StatusMenu, TaskRow } from '@/features/task-row'
 import { useGoogleEvents, useGoogleStatus } from '@/lib/google'
 import { cn } from '@/lib/utils'
 
-type View = 'list' | 'board' | 'day' | 'week' | 'month'
+type View = 'list' | 'board' | 'day' | 'week' | 'month' | 'archive'
 const VIEW_KEY = 'timedesk:tasks-view'
-const VIEWS: View[] = ['list', 'board', 'day', 'week', 'month']
+const VIEWS: View[] = ['list', 'board', 'day', 'week', 'month', 'archive']
 
 function loadView(): View {
   try {
@@ -113,6 +116,8 @@ export default function TasksPage() {
       ),
     [tasks, filter, search],
   )
+  // Finished a week ago or more: out of the list and board, into the Archive (nothing is deleted).
+  const { active, archived } = useMemo(() => splitArchived(shown, now), [shown, now])
   const calendar = view === 'day' || view === 'week' || view === 'month'
   // Google Calendar events for the days on screen, when the calendar is connected. Shown read-only next to the tasks.
   const { status: google } = useGoogleStatus()
@@ -132,7 +137,7 @@ export default function TasksPage() {
     <>
       <PageHeader
         title="Tasks"
-        description="Plan by list, board, day, week or month. Drag a task to move it."
+        description="Plan by list, board, day, week or month. Drag a task to move it. Finished tasks move to the Archive after a week."
         actions={
           <Button onClick={() => setAdding({ due: calendar ? anchor : '' })}>
             <Plus /> New task
@@ -150,6 +155,7 @@ export default function TasksPage() {
             { value: 'day', label: viewLabel(<CalendarDays />, 'Day'), ariaLabel: 'Day view' },
             { value: 'week', label: viewLabel(<CalendarRange />, 'Week'), ariaLabel: 'Week view' },
             { value: 'month', label: viewLabel(<Calendar />, 'Month'), ariaLabel: 'Month view' },
+            { value: 'archive', label: viewLabel(<Archive />, 'Archive'), ariaLabel: 'Archive: tasks finished more than a week ago' },
           ]}
         />
         <Input className="w-full sm:w-56" placeholder="Search tasks" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -190,8 +196,19 @@ export default function TasksPage() {
         </p>
       )}
 
-      {view === 'list' && <ListView tasks={shown} today={today} projectsById={projectsById} />}
-      {view === 'board' && <BoardView tasks={shown} now={now} projectsById={projectsById} />}
+      {view === 'list' && <ListView tasks={active} today={today} projectsById={projectsById} />}
+      {view === 'board' && <BoardView tasks={active} now={now} projectsById={projectsById} />}
+      {(view === 'list' || view === 'board') && archived.length > 0 && (
+        <p className="text-muted-foreground text-sm">
+          {archived.length} task{archived.length === 1 ? '' : 's'} finished more than {ARCHIVE_AFTER_DAYS} days ago {archived.length === 1 ? 'is' : 'are'} in
+          the{' '}
+          <button type="button" className="text-foreground font-medium underline-offset-2 hover:underline" onClick={() => setView('archive')}>
+            Archive
+          </button>
+          .
+        </p>
+      )}
+      {view === 'archive' && <ArchiveView tasks={archived} projectsById={projectsById} searching={!!search || filter !== 'all'} />}
       {view === 'day' && <DayView {...calendarProps} />}
       {view === 'week' && <WeekView {...calendarProps} />}
       {view === 'month' && <MonthView {...calendarProps} />}
@@ -318,6 +335,62 @@ function BoardView({ tasks, now, projectsById }: { tasks: Task[]; now: number; p
           </DropZone>
         )
       })}
+    </div>
+  )
+}
+
+/** Tasks finished a week ago or more, by the week they were finished. Reopen brings one back to To do. */
+function ArchiveView({ tasks, projectsById, searching }: { tasks: Task[]; projectsById: Map<string, Project>; searching: boolean }) {
+  const groups = useMemo(() => archiveByWeek(tasks), [tasks])
+  if (tasks.length === 0) {
+    return (
+      <div className="text-muted-foreground rounded-lg border border-dashed py-16 text-center text-sm">
+        {searching ? 'No archived tasks match. Clear the search or the project filter.' : `Nothing archived yet. Tasks you finish move here ${ARCHIVE_AFTER_DAYS} days later.`}
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-6" data-testid="archive">
+      {groups.map((g) => (
+        <section key={g.weekStart ?? 'earlier'} className="space-y-2">
+          <h2 className="flex items-center gap-2 text-sm font-medium">
+            {g.weekStart ? `Week of ${fmt(g.weekStart, { day: 'numeric', month: 'short', year: 'numeric' })}` : 'Earlier'}
+            <Badge variant="secondary">{g.tasks.length}</Badge>
+          </h2>
+          <ul className="divide-y rounded-lg border">
+            {g.tasks.map((t) => {
+              const project = t.projectId ? projectsById.get(t.projectId) : undefined
+              return (
+                <li key={t.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="text-muted-foreground truncate line-through" title={t.title}>
+                      {t.title}
+                    </p>
+                    <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                      {project && (
+                        <span className="flex items-center gap-1.5">
+                          <ProjectDot project={project} /> {project.name}
+                        </span>
+                      )}
+                      {t.completedAt !== null && (
+                        <span>Finished {new Date(t.completedAt).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                      )}
+                      {t.recurrence && (
+                        <span className="flex items-center gap-1" title="A repeating task: the next one is with your open tasks">
+                          <Repeat className="size-3" /> Repeats
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={() => actions.setStatus(t.id, 'todo')} aria-label={`Reopen ${t.title}`}>
+                    <RotateCcw /> Reopen
+                  </Button>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      ))}
     </div>
   )
 }
