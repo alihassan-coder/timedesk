@@ -63,3 +63,4 @@ export function describeRecurrence(r: Recurrence): string {
   if (r.freq === 'custom') return `Every ${r.every ?? 1} days`
   return { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' }[r.freq]
 }
+

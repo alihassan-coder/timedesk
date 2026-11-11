@@ -9,6 +9,11 @@ The backend is unchanged. Update the desktop app to get the Linux fixes.
 - **App tracking works in the installed app:** the package no longer ships an empty native file that stopped the tracker from loading. The release build now checks this. The `.deb` recommends `x11-utils` (xprop), which tracking uses
 - **A saved login from another keyring** is removed with a clear message, and you sign in again, instead of failing quietly every start. Uses Electron's new async keyring calls (no more deprecation warnings)
 
+### Archive
+- Finished tasks leave the Board and List 7 days after you finish them and move to the new **Archive** view on the Tasks page. It is grouped by the week you finished them, and search and the project filter work there too. Nothing is deleted: reports, wrap-up and weekly review still count them. **Reopen** brings a task back to To do
+- Finished copies of a repeating task archive too; the next one is always waiting in To do
+- The Board and List say how many tasks are in the Archive, with a link to it
+
 ### Projects
 - Cards in a row line up: the footer always sits at the bottom
 - Long descriptions show two lines, with Show more and Show less
