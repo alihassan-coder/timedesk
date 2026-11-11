@@ -132,6 +132,17 @@ jobs:
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           TIMEDESK_PUBLISHER: ${{ vars.TIMEDESK_PUBLISHER }}
 
+      # Issue #2: app tracking failed in the Linux package because an empty native file was shipped. Load the module the
+      # way the installed app does, with the packaged Electron, and fail the release if it does not load.
+      - name: App tracking loads in the packaged Linux app
+        if: matrix.name == 'Linux'
+        working-directory: apps/desktop/release/linux-unpacked
+        shell: bash
+        run: |
+          mod=resources/app.asar.unpacked/node_modules/active-win
+          if ls "$mod/lib/binding" 2>/dev/null | grep -q linux; then echo "::error::an empty Linux binding of active-win was packaged"; exit 1; fi
+          ELECTRON_RUN_AS_NODE=1 ./timedesk -e "import('./$mod/index.js').then((m) => { if (typeof m.activeWindow !== 'function') throw new Error('no activeWindow'); console.log('active-win loads in the packaged app') })"
+
       - name: List what was built
         working-directory: apps/desktop/release
         shell: bash

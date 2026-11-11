@@ -103,11 +103,45 @@ export function contentSecurityPolicy(apiUrl: string | null): string {
  * floating timer and reading the window in front (active-win) only work there. TIMEDESK_WAYLAND=1, an --ozone-platform
  * flag or ELECTRON_OZONE_PLATFORM_HINT keeps whatever was asked for. Returns the platform to force, and why (for the log).
  */
-export function linuxOzonePlatform(src: { platform: string; env: Record<string, string | undefined>; argv: string[] }): { force: 'x11' | null; reason: string } {
-  if (src.platform !== 'linux') return { force: null, reason: 'not linux' }
-  if ((src.env.XDG_SESSION_TYPE ?? '').toLowerCase() !== 'wayland') return { force: null, reason: `session type ${src.env.XDG_SESSION_TYPE || 'unknown'}` }
-  if (src.env.TIMEDESK_WAYLAND === '1') return { force: null, reason: 'native Wayland (TIMEDESK_WAYLAND=1)' }
-  if (src.argv.some((a) => a.startsWith('--ozone-platform'))) return { force: null, reason: 'native choice from the command line' }
-  if (src.env.ELECTRON_OZONE_PLATFORM_HINT) return { force: null, reason: `ELECTRON_OZONE_PLATFORM_HINT=${src.env.ELECTRON_OZONE_PLATFORM_HINT}` }
-  return { force: 'x11', reason: 'Wayland session: using XWayland so the floating timer and app tracking work' }
+export function linuxOzonePlatform(src: {
+  platform: string
+  env: Record<string, string | undefined>
+  argv: string[]
+  /** Written after a start that showed no window (see startupRecovery). Only counts for the version that wrote it. */
+  safeMode?: SafeMode | null
+  appVersion?: string
+}): { force: 'x11' | 'wayland' | null; disableGpu: boolean; reason: string } {
+  const plain = (force: 'x11' | null, reason: string) => ({ force, disableGpu: false, reason })
+  if (src.platform !== 'linux') return plain(null, 'not linux')
+  const wayland = (src.env.XDG_SESSION_TYPE ?? '').toLowerCase() === 'wayland'
+  const safe = !!src.safeMode && src.safeMode.version === src.appVersion && src.env.TIMEDESK_X11 !== '1'
+  if (safe) {
+    const why = `safe mode after a start with no window (${src.safeMode!.reason}): hardware acceleration off`
+    return wayland ? { force: 'wayland', disableGpu: true, reason: `${why}, native Wayland` } : { force: null, disableGpu: true, reason: why }
+  }
+  if (!wayland) return plain(null, `session type ${src.env.XDG_SESSION_TYPE || 'unknown'}`)
+  if (src.env.TIMEDESK_X11 === '1') return plain('x11', 'XWayland (TIMEDESK_X11=1)')
+  if (src.env.TIMEDESK_WAYLAND === '1') return plain(null, 'native Wayland (TIMEDESK_WAYLAND=1)')
+  if (src.argv.some((a) => a.startsWith('--ozone-platform'))) return plain(null, 'native choice from the command line')
+  if (src.env.ELECTRON_OZONE_PLATFORM_HINT) return plain(null, `ELECTRON_OZONE_PLATFORM_HINT=${src.env.ELECTRON_OZONE_PLATFORM_HINT}`)
+  return plain('x11', 'Wayland session: using XWayland so the floating timer and app tracking work')
+}
+
+/** Remembered in the data folder after a Linux start that showed no window: the next start uses the safe settings. */
+export interface SafeMode {
+  version: string
+  reason: string
+}
+
+/**
+ * What to do when the start goes wrong on Linux (issue #2: the GPU process crashes through XWayland on some Intel
+ * laptops, and the window never appears while the app keeps running invisibly and holds the single-instance lock).
+ * - relaunch-safe: remember safe mode and start again (native Wayland on Wayland, no hardware acceleration)
+ * - quit: safe mode did not help either; quit so a click on the icon can start it again, instead of hiding forever
+ * - ignore: nothing to do (other systems, or the window is already on screen, where Chromium recovers by itself)
+ */
+export function startupRecovery(s: { platform: string; inSafeMode: boolean; windowShown: boolean; event: 'gpu-crash' | 'no-window' }): 'relaunch-safe' | 'quit' | 'ignore' {
+  if (s.platform !== 'linux' || s.windowShown) return 'ignore'
+  if (!s.inSafeMode) return 'relaunch-safe'
+  return s.event === 'no-window' ? 'quit' : 'ignore'
 }

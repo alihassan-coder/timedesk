@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { MoreHorizontal, Pencil, Play, Plus, Trash2 } from 'lucide-react'
-import type { Project } from '@timedesk/shared'
-import { formatHours, isHexColor, overlapMs, periodStart } from '@timedesk/shared'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { MoreHorizontal, Pencil, Play, Plus, Square, Trash2 } from 'lucide-react'
+import type { Project, TimeEntry } from '@timedesk/shared'
+import { entryDuration, formatDuration, formatHours, isHexColor, overlapMs, periodStart, runningEntries } from '@timedesk/shared'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,14 +13,16 @@ import { Progress } from '@/components/ui/progress'
 import { actions, useStore } from '@/data/store'
 import { useNow } from '@/data/use-now'
 import { ProjectDot } from '@/components/project-dot'
-import { PRESET_NAMES, PRESETS, PROJECT_COLORS } from '@/lib/project-colors'
+import { PRESET_NAMES, PRESETS, PROJECT_COLORS, projectColor } from '@/lib/project-colors'
 import { cn } from '@/lib/utils'
 
 export default function ProjectsPage() {
   const [editing, setEditing] = useState<Project | null>(null)
   const [deleting, setDeleting] = useState<Project | null>(null)
-  const { projects, tasks, tracked } = useStore()
-  const now = useNow(false)
+  const { projects, tasks, tracked, entries } = useStore()
+  const timers = useMemo(() => runningEntries(entries), [entries])
+  const taskProject = useMemo(() => new Map(tasks.map((t) => [t.id, t.projectId])), [tasks])
+  const now = useNow(timers.length > 0)
   const monthStart = periodStart('month', now)
 
   return (
@@ -39,59 +41,160 @@ export default function ProjectsPage() {
         {projects.map((p) => {
           const mine = tasks.filter((t) => t.projectId === p.id)
           const done = mine.filter((t) => t.status === 'done').length
-          const pct = mine.length ? Math.round((done / mine.length) * 100) : 0
           const month = tracked
             .filter((e) => e.projectId === p.id)
             .reduce((s, e) => s + overlapMs(e, monthStart, now + 1, now), 0)
+          // A timer on one of the project's tasks counts for the project too.
+          const running = timers.filter((e) => e.projectId === p.id || (e.taskId !== null && taskProject.get(e.taskId) === p.id))
           return (
-            <Card key={p.id}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ProjectDot project={p} /> <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                </CardTitle>
-                <CardDescription>{p.description || 'No description'}</CardDescription>
-                <CardAction>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Options for ${p.name}`} />}>
-                      <MoreHorizontal />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setEditing(p)}>
-                        <Pencil /> Edit project
-                      </DropdownMenuItem>
-                      <DropdownMenuItem variant="destructive" onClick={() => setDeleting(p)}>
-                        <Trash2 /> Delete project
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      {done} of {mine.length} tasks done
-                    </span>
-                    <span>{pct}%</span>
-                  </div>
-                  <Progress value={pct} />
-                </div>
-                <p className="text-sm">
-                  <span className="text-2xl font-semibold">{formatHours(month)}</span>
-                  <span className="text-muted-foreground"> tracked this month</span>
-                </p>
-              </CardContent>
-              <CardFooter>
-                <Button size="sm" variant="outline" onClick={() => actions.startTimer({ projectId: p.id })}>
-                  <Play /> Start timer
-                </Button>
-              </CardFooter>
-            </Card>
+            <ProjectCard
+              key={p.id}
+              project={p}
+              done={done}
+              total={mine.length}
+              monthMs={month}
+              running={running}
+              now={now}
+              onEdit={() => setEditing(p)}
+              onDelete={() => setDeleting(p)}
+            />
           )
         })}
       </div>
       <EditProjectDialog project={editing} onClose={() => setEditing(null)} />
       <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} />
+    </>
+  )
+}
+
+function ProjectCard({
+  project: p,
+  done,
+  total,
+  monthMs,
+  running,
+  now,
+  onEdit,
+  onDelete,
+}: {
+  project: Project
+  done: number
+  total: number
+  monthMs: number
+  running: TimeEntry[]
+  now: number
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const pct = total ? Math.round((done / total) * 100) : 0
+  const open = total - done
+  const live = running.length > 0
+  const since = live ? Math.max(...running.map((e) => entryDuration(e, now))) : 0
+  return (
+    <Card
+      // The project's own colour is the card's accent: its progress bar, and a ring while a timer runs on it.
+      style={{ '--project': projectColor(p) } as CSSProperties}
+      className={cn('transition-shadow', live && 'ring-2 ring-(--project)')}
+    >
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ProjectDot project={p} className={cn(live && 'motion-safe:animate-pulse')} />
+          <span className="min-w-0 flex-1 truncate" title={p.name}>
+            {p.name}
+          </span>
+        </CardTitle>
+        <CardDescription>
+          {p.description ? <ClampedText text={p.description} /> : <span className="italic opacity-70">No description</span>}
+        </CardDescription>
+        <CardAction>
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Options for ${p.name}`} />}>
+              <MoreHorizontal />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onEdit}>
+                <Pencil /> Edit project
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                <Trash2 /> Delete project
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </CardAction>
+      </CardHeader>
+      {/* flex-1 pushes the footer to the bottom, so cards of one row line up even when one has a longer description. */}
+      <CardContent className="flex flex-1 flex-col justify-end gap-3">
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">
+              {total === 0 ? 'No tasks yet' : `${done} of ${total} tasks done`}
+            </span>
+            {total > 0 && <span className="tabular-nums">{pct}%</span>}
+          </div>
+          <Progress value={pct} className="[&_[data-slot=progress-indicator]]:bg-(--project)" />
+        </div>
+        <p className="text-sm">
+          <span className="text-2xl font-semibold tabular-nums">{formatHours(monthMs)}</span>
+          <span className="text-muted-foreground"> tracked this month</span>
+        </p>
+      </CardContent>
+      <CardFooter className="justify-between gap-2">
+        {live ? (
+          <>
+            <span className="flex items-center gap-2 text-sm font-medium" aria-live="polite">
+              <span className="size-2 rounded-full bg-(--project) motion-safe:animate-pulse" aria-hidden />
+              Tracking <span className="tabular-nums">{formatDuration(since)}</span>
+            </span>
+            <Button size="sm" variant="outline" onClick={() => running.forEach((e) => actions.stopTimer(undefined, e.id))}>
+              <Square /> Stop
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" variant="outline" onClick={() => actions.startTimer({ projectId: p.id })}>
+              <Play /> Start timer
+            </Button>
+            {open > 0 && (
+              <span className="text-muted-foreground text-xs">
+                {open} open task{open === 1 ? '' : 's'}
+              </span>
+            )}
+          </>
+        )}
+      </CardFooter>
+    </Card>
+  )
+}
+
+/** Shows two lines; when the text is longer, "Show more" opens the rest in place. */
+function ClampedText({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null)
+  const [open, setOpen] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => setOverflows(el.scrollHeight > el.clientHeight + 1)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [text])
+  return (
+    <>
+      <p ref={ref} className={cn('break-words whitespace-pre-line', !open && 'line-clamp-2')}>
+        {text}
+      </p>
+      {(overflows || open) && (
+        <button
+          type="button"
+          className="text-foreground/80 hover:text-foreground mt-0.5 text-xs font-medium underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      )}
     </>
   )
 }

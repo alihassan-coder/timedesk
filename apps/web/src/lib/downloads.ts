@@ -4,7 +4,9 @@
  */
 const RELEASES = 'https://github.com/alihassan-coder/timedesk/releases/latest'
 
-export const DESKTOP_VERSION = '0.3.1'
+declare const __DESKTOP_VERSION__: string
+/** Taken from apps/desktop/package.json when the site is built (vite.config.ts), so it always matches the latest release. */
+export const DESKTOP_VERSION = __DESKTOP_VERSION__
 
 export const downloads = [
   { id: 'win', label: 'Windows', file: `timedesk-Setup-${DESKTOP_VERSION}.exe`, note: 'Windows 10 and 11, 64-bit', href: RELEASES },
